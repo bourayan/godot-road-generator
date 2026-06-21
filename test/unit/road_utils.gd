@@ -51,6 +51,49 @@ func create_intersection_two_branch(container):
 
 	p1.next_pt_init = p1.get_path_to(i1) # will trigger a rebuild on inter'
 	p2.prior_pt_init = p2.get_path_to(i1) # will trigger a rebuild on inter'
-	
+
 	# Due to manual assignment, must call this manually
+	container.update_edges()
+
+
+## Creates a four-branch intersection with each edge facing the center, so all
+## edges feed forward lanes into the intersection.
+func create_intersection_four_branch(container):
+	container.setup_road_container()
+
+	assert_eq(container.get_child_count(), 0, "No initial point children")
+
+	var i1 = autoqfree(RoadIntersection.new())
+	var pn = autoqfree(RoadPoint.new())
+	var ps = autoqfree(RoadPoint.new())
+	var pe = autoqfree(RoadPoint.new())
+	var pw = autoqfree(RoadPoint.new())
+	pn.name = "pn"
+	ps.name = "ps"
+	pe.name = "pe"
+	pw.name = "pw"
+
+	container.add_child(i1)
+	container.add_child(pn)
+	container.add_child(ps)
+	container.add_child(pe)
+	container.add_child(pw)
+
+	pn.position = Vector3(0, 0, -10)
+	ps.position = Vector3(0, 0, 10)
+	pe.position = Vector3(10, 0, 0)
+	pw.position = Vector3(-10, 0, 0)
+	# Rotate each edge so its forward axis points at the center.
+	ps.rotation_degrees.y = 180
+	pe.rotation_degrees.y = -90
+	pw.rotation_degrees.y = 90
+
+	var edges: Array[RoadPoint] = [pn, ps, pe, pw]
+	i1.edge_points = edges
+
+	pn.next_pt_init = pn.get_path_to(i1)
+	ps.next_pt_init = ps.get_path_to(i1)
+	pe.next_pt_init = pe.get_path_to(i1)
+	pw.next_pt_init = pw.get_path_to(i1)
+
 	container.update_edges()

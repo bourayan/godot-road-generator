@@ -64,32 +64,49 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 		var facing: _IntersectNGonFacing = _get_edge_facing(edge, intersection)
 		if facing == _IntersectNGonFacing.OTHER:
 			continue
-
 		var entering := _directional_lanes(edge, _entering_dir(facing))
+		if entering.is_empty():
+			continue
+		var entry_dir := _edge_inward_dir(edge, intersection)
+		var opposite := _opposite_edge(edges, i, intersection)
+
+		# Through lanes: every entering lane continues to the opposite edge.
 		var exiting := _opposite_exit_lanes(edges, i, intersection)
-
 		for k in range(entering.size()):
-			var lane_info: Dictionary = entering[k]
-			var lane_name := "%s%s_%s" % [LANE_NAME_PREFIX, edge.name, lane_info["tag"]]
-			var lane := _get_or_create_lane(intersection, container, manager, lane_name)
-			active_lanes.append(lane)
-			lane.lane_prior_tag = lane_info["tag"]
-
-			var entry := _lane_stop_position(edge, intersection, lane_info["index"])
-			var entry_dir := _edge_inward_dir(edge, intersection)
+			var src: Dictionary = entering[k]
+			var entry := _lane_stop_position(edge, intersection, src["index"])
 			var exit_point := intersection.global_transform.origin
 			var exit_dir := entry_dir
+			var next_tag := ""
 			if not exiting.is_empty():
 				var target: Dictionary = exiting[mini(k, exiting.size() - 1)]
 				exit_point = _lane_stop_position(target["edge"], intersection, target["index"])
 				exit_dir = -_edge_inward_dir(target["edge"], intersection)
-				lane.lane_next_tag = target["tag"]
-			_assign_through_curve(lane, intersection, entry, exit_point, entry_dir, exit_dir)
+				next_tag = target["tag"]
+			var lane_name := "%s%s_%s" % [LANE_NAME_PREFIX, edge.name, src["tag"]]
+			_emit_lane(intersection, container, manager, active_lanes, lane_name,
+					src["tag"], next_tag, entry, entry_dir, exit_point, exit_dir)
 
-			lane.draw_in_editor = container.draw_lanes_editor
-			lane.draw_in_game = container.draw_lanes_game
-			lane.refresh_geom = true
-			lane.rebuild_geom()
+		# Turn lanes: the turn-side entering lane reaches each remaining edge.
+		for j in range(edges.size()):
+			if j == i or j == opposite or not is_instance_valid(edges[j]):
+				continue
+			var target_edge: RoadPoint = edges[j]
+			var target_facing: _IntersectNGonFacing = _get_edge_facing(target_edge, intersection)
+			if target_facing == _IntersectNGonFacing.OTHER:
+				continue
+			var target_exit := _directional_lanes(target_edge, _exiting_dir(target_facing))
+			if target_exit.is_empty():
+				continue
+			var clockwise := _turn_is_clockwise(edge, target_edge, intersection)
+			var turn_src: Dictionary = entering[entering.size() - 1] if clockwise else entering[0]
+			var turn_dst: Dictionary = target_exit[target_exit.size() - 1] if clockwise else target_exit[0]
+			var turn_entry := _lane_stop_position(edge, intersection, turn_src["index"])
+			var turn_exit := _lane_stop_position(target_edge, intersection, turn_dst["index"])
+			var turn_exit_dir := -_edge_inward_dir(target_edge, intersection)
+			var turn_name := "%s%s_%s_%s" % [LANE_NAME_PREFIX, edge.name, turn_src["tag"], target_edge.name]
+			_emit_lane(intersection, container, manager, active_lanes, turn_name,
+					turn_src["tag"], turn_dst["tag"], turn_entry, entry_dir, turn_exit, turn_exit_dir)
 
 	_clear_generated_lanes(intersection, active_lanes)
 
@@ -192,6 +209,15 @@ func _opposite_edge(edges: Array[RoadPoint], index: int, intersection: Node3D) -
 	return best
 
 
+## True if the target edge lies clockwise (to the right) of the edge's inbound
+## direction about the intersection's up axis.
+func _turn_is_clockwise(edge: RoadPoint, target: RoadPoint, intersection: Node3D) -> bool:
+	var up: Vector3 = intersection.global_transform.basis.y.normalized()
+	var inward := _edge_inward_dir(edge, intersection)
+	var to_target := (target.global_transform.origin - intersection.global_transform.origin).normalized()
+	return inward.signed_angle_to(to_target, up) > 0.0
+
+
 ## Finds an existing generated lane by name or creates one, ensuring group
 ## membership and editor metadata.
 func _get_or_create_lane(intersection: Node3D, container: RoadContainer, manager: RoadManager, lane_name: String) -> RoadLane:
@@ -212,6 +238,19 @@ func _get_or_create_lane(intersection: Node3D, container: RoadContainer, manager
 	elif is_instance_valid(manager) and manager.ai_lane_group != "":
 		lane.add_to_group(manager.ai_lane_group)
 	return lane
+
+
+## Creates or updates a single lane with its tags, curve and draw settings.
+func _emit_lane(intersection: Node3D, container: RoadContainer, manager: RoadManager, active_lanes: Array[RoadLane], lane_name: String, prior_tag: String, next_tag: String, entry: Vector3, entry_dir: Vector3, exit_point: Vector3, exit_dir: Vector3) -> void:
+	var lane := _get_or_create_lane(intersection, container, manager, lane_name)
+	active_lanes.append(lane)
+	lane.lane_prior_tag = prior_tag
+	lane.lane_next_tag = next_tag
+	_assign_through_curve(lane, intersection, entry, exit_point, entry_dir, exit_dir)
+	lane.draw_in_editor = container.draw_lanes_editor
+	lane.draw_in_game = container.draw_lanes_game
+	lane.refresh_geom = true
+	lane.rebuild_geom()
 
 
 ## World-space center of a single lane at its edge's stop line.

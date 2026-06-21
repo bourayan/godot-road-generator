@@ -215,3 +215,48 @@ func test_offset_lane_arcs_between_edges():
 	var lane: RoadLane = inter.get_node("RoadLane_p1_F0")
 	var chord := lane.get_lane_start().distance_to(lane.get_lane_end())
 	assert_gt(lane.curve.get_baked_length(), chord + 0.5, "Offset lane curves rather than cutting straight")
+
+
+func _turn_lane_to(node: Node, edge_name: String, target_name: String) -> RoadLane:
+	for child in node.get_children():
+		if child is RoadLane and str(child.name).begins_with("RoadLane_%s_" % edge_name) \
+				and str(child.name).ends_with("_%s" % target_name):
+			return child
+	return null
+
+
+func test_four_way_generates_through_and_turn_lanes():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	container.setup_road_container()
+	road_util.create_intersection_four_branch(container)
+	var inter: RoadIntersection = container.get_intersections()[0]
+
+	container.rebuild_segments(true)
+
+	# Each of four edges has two through lanes plus a turn to each adjacent edge.
+	assert_eq(_lanes(inter).size(), 16, "Through and turn lanes for every edge")
+	assert_eq(_lanes_for_edge(inter, "pn").size(), 4, "Two through and two turn lanes")
+
+
+func test_four_way_turn_lane_reaches_target_edge():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	container.setup_road_container()
+	road_util.create_intersection_four_branch(container)
+	var inter: RoadIntersection = container.get_intersections()[0]
+
+	container.rebuild_segments(true)
+
+	var turn := _turn_lane_to(inter, "pn", "pw")
+	assert_not_null(turn, "Turn lane from pn to pw exists")
+	if turn == null:
+		return
+	var turn_start := turn.get_lane_start()
+	var turn_end := turn.get_lane_end()
+	assert_lt(turn_start.z, -1.0, "Turn starts on the north edge")
+	assert_lt(turn_end.x, -1.0, "Turn ends on the west edge")
+	var chord := turn_start.distance_to(turn_end)
+	assert_gt(turn.curve.get_baked_length(), chord + 0.5, "Turn lane arcs around the corner")
