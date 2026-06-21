@@ -186,3 +186,32 @@ func test_mismatched_lane_counts_merge():
 		assert_eq(lane.curve.point_count, 2, "Each lane is routed")
 	var extra: RoadLane = inter.get_node("RoadLane_p1_F2")
 	assert_eq(extra.lane_next_tag, "F1", "Surplus lane merges into the outer exit lane")
+
+
+func test_colinear_lane_stays_straight():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	var inter := _make_intersection(container)
+
+	container.rebuild_segments(true)
+
+	var lane: RoadLane = inter.get_node("RoadLane_p1_F0")
+	var chord := lane.get_lane_start().distance_to(lane.get_lane_end())
+	assert_almost_eq(lane.curve.get_baked_length(), chord, 0.1, "Colinear lane has no bulge")
+
+
+func test_offset_lane_arcs_between_edges():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	var inter := _make_intersection(container)
+	# Shift the opposite edge sideways so the through lane must curve.
+	var p2: RoadPoint = container.get_node("p2")
+	p2.position += Vector3(10.0, 0.0, 0.0)
+
+	container.rebuild_segments(true)
+
+	var lane: RoadLane = inter.get_node("RoadLane_p1_F0")
+	var chord := lane.get_lane_start().distance_to(lane.get_lane_end())
+	assert_gt(lane.curve.get_baked_length(), chord + 0.5, "Offset lane curves rather than cutting straight")

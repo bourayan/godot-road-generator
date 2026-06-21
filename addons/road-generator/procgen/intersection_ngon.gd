@@ -76,12 +76,15 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 			lane.lane_prior_tag = lane_info["tag"]
 
 			var entry := _lane_stop_position(edge, intersection, lane_info["index"])
+			var entry_dir := _edge_inward_dir(edge, intersection)
 			var exit_point := intersection.global_transform.origin
+			var exit_dir := entry_dir
 			if not exiting.is_empty():
 				var target: Dictionary = exiting[mini(k, exiting.size() - 1)]
 				exit_point = _lane_stop_position(target["edge"], intersection, target["index"])
+				exit_dir = -_edge_inward_dir(target["edge"], intersection)
 				lane.lane_next_tag = target["tag"]
-			_assign_through_curve(lane, intersection, entry, exit_point)
+			_assign_through_curve(lane, intersection, entry, exit_point, entry_dir, exit_dir)
 
 			lane.draw_in_editor = container.draw_lanes_editor
 			lane.draw_in_game = container.draw_lanes_game
@@ -114,13 +117,19 @@ func _get_edge_facing(edge: RoadPoint, intersection: Node3D) -> _IntersectNGonFa
 	return facing
 
 
-## World-space center of an edge's stop line, where its lanes meet the intersection.
-func _edge_stop_center(edge: RoadPoint, intersection: Node3D) -> Vector3:
+## World-space direction along an edge pointing toward the intersection (the
+## travel direction of its entering lanes).
+func _edge_inward_dir(edge: RoadPoint, intersection: Node3D) -> Vector3:
 	var facing: _IntersectNGonFacing = _get_edge_facing(edge, intersection)
 	var parallel_v: Vector3 = edge.global_transform.basis.z.normalized()
 	if facing == _IntersectNGonFacing.ORIGIN:
 		parallel_v = -parallel_v
-	return edge.global_transform.origin + parallel_v * STOP_ROW_SIZE
+	return parallel_v
+
+
+## World-space center of an edge's stop line, where its lanes meet the intersection.
+func _edge_stop_center(edge: RoadPoint, intersection: Node3D) -> Vector3:
+	return edge.global_transform.origin + _edge_inward_dir(edge, intersection) * STOP_ROW_SIZE
 
 
 func _entering_dir(facing: _IntersectNGonFacing) -> int:
@@ -213,12 +222,20 @@ func _lane_stop_position(edge: RoadPoint, intersection: Node3D, lane_index: int)
 	return _edge_stop_center(edge, intersection) + perpendicular_v * offset
 
 
-## Straight line from an entry point to an exit point, in the lane's local space.
-func _assign_through_curve(lane: RoadLane, intersection: Node3D, entry: Vector3, exit_point: Vector3) -> void:
+## Curve from an entry point to an exit point, in the lane's local space, with
+## bezier handles aligned to the entry and exit travel directions so the lane
+## arcs smoothly (and stays straight when the directions are colinear).
+func _assign_through_curve(lane: RoadLane, intersection: Node3D, entry: Vector3, exit_point: Vector3, entry_dir: Vector3, exit_dir: Vector3) -> void:
 	var to_local: Transform3D = lane.global_transform.affine_inverse()
+	var start := to_local * entry
+	var end := to_local * exit_point
+	var handle := start.distance_to(end) / 3.0
+	var start_tangent := (to_local.basis * entry_dir).normalized() * handle
+	var end_tangent := (to_local.basis * exit_dir).normalized() * handle
+
 	var curve := Curve3D.new()
-	curve.add_point(to_local * entry)
-	curve.add_point(to_local * exit_point)
+	curve.add_point(start, Vector3.ZERO, start_tangent)
+	curve.add_point(end, -end_tangent, Vector3.ZERO)
 	lane.curve = curve
 
 
