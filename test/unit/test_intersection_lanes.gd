@@ -136,3 +136,53 @@ func test_lanes_have_curve_points():
 
 	for lane in _lanes(inter):
 		assert_eq(lane.curve.point_count, 2, "Lane has start and end points")
+
+
+func test_straight_through_lane_crosses_intersection():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	var inter := _make_intersection(container)
+
+	container.rebuild_segments(true)
+
+	var lane: RoadLane = inter.get_node("RoadLane_p1_F0")
+	var lane_start := lane.get_lane_start()
+	var lane_end := lane.get_lane_end()
+	assert_almost_eq(lane_start.x, lane_end.x, 0.01, "Through lane keeps a constant offset")
+	assert_true(lane_start.z < 0.0 and lane_end.z > 0.0, "Through lane spans both edges")
+
+
+func test_straight_through_keeps_tag():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	var inter := _make_intersection(container)
+
+	container.rebuild_segments(true)
+
+	var lane: RoadLane = inter.get_node("RoadLane_p1_F0")
+	assert_eq(lane.lane_next_tag, "F0", "Straight-through lane exits with the same tag")
+
+
+func test_mismatched_lane_counts_merge():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	var inter := _make_intersection(container)
+	# Three forward entering lanes feeding into two exit lanes opposite.
+	var p1: RoadPoint = container.get_node("p1")
+	p1.traffic_dir = [
+		RoadPoint.LaneDir.REVERSE,
+		RoadPoint.LaneDir.FORWARD,
+		RoadPoint.LaneDir.FORWARD,
+		RoadPoint.LaneDir.FORWARD,
+	]
+
+	container.rebuild_segments(true)
+
+	assert_eq(_lanes_for_edge(inter, "p1").size(), 3, "All entering lanes generated")
+	for lane in _lanes_for_edge(inter, "p1"):
+		assert_eq(lane.curve.point_count, 2, "Each lane is routed")
+	var extra: RoadLane = inter.get_node("RoadLane_p1_F2")
+	assert_eq(extra.lane_next_tag, "F1", "Surplus lane merges into the outer exit lane")
