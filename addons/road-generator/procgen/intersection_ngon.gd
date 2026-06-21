@@ -241,9 +241,13 @@ func _get_or_create_lane(intersection: Node3D, container: RoadContainer, manager
 
 
 ## Creates or updates a single lane with its tags, curve and draw settings.
+## Lanes the user has promoted to editable (given an owner) are left untouched.
 func _emit_lane(intersection: Node3D, container: RoadContainer, manager: RoadManager, active_lanes: Array[RoadLane], lane_name: String, prior_tag: String, next_tag: String, entry: Vector3, entry_dir: Vector3, exit_point: Vector3, exit_dir: Vector3) -> void:
+	var existing := intersection.get_node_or_null(lane_name)
 	var lane := _get_or_create_lane(intersection, container, manager, lane_name)
 	active_lanes.append(lane)
+	if existing is RoadLane and is_instance_valid(existing.owner):
+		return
 	lane.lane_prior_tag = prior_tag
 	lane.lane_next_tag = next_tag
 	_assign_through_curve(lane, intersection, entry, exit_point, entry_dir, exit_dir)
@@ -253,10 +257,13 @@ func _emit_lane(intersection: Node3D, container: RoadContainer, manager: RoadMan
 	lane.rebuild_geom()
 
 
-## World-space center of a single lane at its edge's stop line.
+## World-space center of a single lane at its edge's stop line. Geometric edges
+## center their lanes; divider-aligned edges keep the direction split at origin.
 func _lane_stop_position(edge: RoadPoint, intersection: Node3D, lane_index: int) -> Vector3:
-	var total := edge.traffic_dir.size()
-	var offset := (lane_index - total / 2.0 + 0.5) * edge.lane_width
+	var reference := edge.traffic_dir.size() / 2.0
+	if edge.alignment == RoadPoint.Alignment.DIVIDER:
+		reference = edge.get_rev_lane_count()
+	var offset := (lane_index - reference + 0.5) * edge.lane_width
 	var perpendicular_v: Vector3 = edge.global_transform.basis.x.normalized()
 	return _edge_stop_center(edge, intersection) + perpendicular_v * offset
 

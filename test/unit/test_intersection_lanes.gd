@@ -260,3 +260,46 @@ func test_four_way_turn_lane_reaches_target_edge():
 	assert_lt(turn_end.x, -1.0, "Turn ends on the west edge")
 	var chord := turn_start.distance_to(turn_end)
 	assert_gt(turn.curve.get_baked_length(), chord + 0.5, "Turn lane arcs around the corner")
+
+
+func test_divider_alignment_shifts_lane_offset():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	var inter := _make_intersection(container)
+	var p1: RoadPoint = container.get_node("p1")
+	p1.traffic_dir = [
+		RoadPoint.LaneDir.REVERSE,
+		RoadPoint.LaneDir.FORWARD,
+		RoadPoint.LaneDir.FORWARD,
+		RoadPoint.LaneDir.FORWARD,
+	]
+
+	p1.alignment = RoadPoint.Alignment.GEOMETRIC
+	container.rebuild_segments(true)
+	var geometric_x: float = (inter.get_node("RoadLane_p1_F0") as RoadLane).get_lane_start().x
+
+	p1.alignment = RoadPoint.Alignment.DIVIDER
+	container.rebuild_segments(true)
+	var divider_x: float = (inter.get_node("RoadLane_p1_F0") as RoadLane).get_lane_start().x
+
+	assert_almost_eq(divider_x - geometric_x, 4.0, 0.01, "Divider shifts forward lanes by one lane width")
+
+
+func test_editable_lane_preserved_on_rebuild():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	var inter := _make_intersection(container)
+	container.rebuild_segments(true)
+
+	var lane: RoadLane = inter.get_node("RoadLane_p1_F0")
+	lane.owner = container
+	var custom := Curve3D.new()
+	custom.add_point(Vector3(99, 0, 0))
+	custom.add_point(Vector3(100, 0, 0))
+	lane.curve = custom
+
+	container.rebuild_segments(true)
+
+	assert_eq(lane.curve.get_point_position(0), Vector3(99, 0, 0), "User-edited lane is left intact")
