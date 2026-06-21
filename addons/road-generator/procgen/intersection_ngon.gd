@@ -60,33 +60,21 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 	for edge: RoadPoint in edges:
 		if not is_instance_valid(edge):
 			continue
+		var facing: _IntersectNGonFacing = _get_edge_facing(edge, intersection)
+		if facing == _IntersectNGonFacing.OTHER:
+			continue
 
-		var lane_name := "%s%s" % [LANE_NAME_PREFIX, edge.name]
-		var existing := intersection.get_node_or_null(lane_name)
-		var lane: RoadLane
-		if existing is RoadLane:
-			lane = existing
-		else:
-			lane = RoadLane.new()
-			intersection.add_child(lane)
-			lane.name = lane_name
-			lane.set_meta("_edit_lock_", true)
-			lane.auto_free_vehicles = container.auto_free_vehicles
-			if container.debug_scene_visible:
-				lane.owner = container.get_owner()
-		active_lanes.append(lane)
+		for lane_info in _entering_lanes(edge, facing):
+			var lane_name := "%s%s_%s" % [LANE_NAME_PREFIX, edge.name, lane_info["tag"]]
+			var lane := _get_or_create_lane(intersection, container, manager, lane_name)
+			active_lanes.append(lane)
+			lane.lane_prior_tag = lane_info["tag"]
+			_assign_entering_curve(lane, edge, intersection, lane_info["index"])
 
-		if container.ai_lane_group != "":
-			lane.add_to_group(container.ai_lane_group)
-		elif is_instance_valid(manager) and manager.ai_lane_group != "":
-			lane.add_to_group(manager.ai_lane_group)
-
-		_assign_edge_stub_curve(lane, edge, intersection)
-
-		lane.draw_in_editor = container.draw_lanes_editor
-		lane.draw_in_game = container.draw_lanes_game
-		lane.refresh_geom = true
-		lane.rebuild_geom()
+			lane.draw_in_editor = container.draw_lanes_editor
+			lane.draw_in_game = container.draw_lanes_game
+			lane.refresh_geom = true
+			lane.rebuild_geom()
 
 	_clear_generated_lanes(intersection, active_lanes)
 
@@ -123,13 +111,60 @@ func _edge_stop_center(edge: RoadPoint, intersection: Node3D) -> Vector3:
 	return edge.global_transform.origin + parallel_v * STOP_ROW_SIZE
 
 
-## Straight line from the intersection center to the edge's stop line,
+## Lanes flowing into the intersection from an edge, each as a dictionary with
+## its `index` in the edge's traffic_dir and its `F#`/`R#` `tag`.
+func _entering_lanes(edge: RoadPoint, facing: _IntersectNGonFacing) -> Array:
+	var entering_dir := RoadPoint.LaneDir.FORWARD
+	if facing == _IntersectNGonFacing.ORIGIN:
+		entering_dir = RoadPoint.LaneDir.REVERSE
+	var rev_count := edge.get_rev_lane_count()
+	var result: Array = []
+	for i in range(edge.traffic_dir.size()):
+		if edge.traffic_dir[i] != entering_dir:
+			continue
+		var tag: String
+		if entering_dir == RoadPoint.LaneDir.FORWARD:
+			tag = "F%d" % (i - rev_count)
+		else:
+			tag = "R%d" % (rev_count - 1 - i)
+		result.append({"index": i, "tag": tag})
+	return result
+
+
+## Finds an existing generated lane by name or creates one, ensuring group
+## membership and editor metadata.
+func _get_or_create_lane(intersection: Node3D, container: RoadContainer, manager: RoadManager, lane_name: String) -> RoadLane:
+	var existing := intersection.get_node_or_null(lane_name)
+	var lane: RoadLane
+	if existing is RoadLane:
+		lane = existing
+	else:
+		lane = RoadLane.new()
+		intersection.add_child(lane)
+		lane.name = lane_name
+		lane.set_meta("_edit_lock_", true)
+		lane.auto_free_vehicles = container.auto_free_vehicles
+		if container.debug_scene_visible:
+			lane.owner = container.get_owner()
+	if container.ai_lane_group != "":
+		lane.add_to_group(container.ai_lane_group)
+	elif is_instance_valid(manager) and manager.ai_lane_group != "":
+		lane.add_to_group(manager.ai_lane_group)
+	return lane
+
+
+## Straight line from a lane's stop-line center to the intersection center,
 ## stored in the lane's local space.
-func _assign_edge_stub_curve(lane: RoadLane, edge: RoadPoint, intersection: Node3D) -> void:
+func _assign_entering_curve(lane: RoadLane, edge: RoadPoint, intersection: Node3D, lane_index: int) -> void:
+	var total := edge.traffic_dir.size()
+	var offset := (lane_index - total / 2.0 + 0.5) * edge.lane_width
+	var perpendicular_v: Vector3 = edge.global_transform.basis.x.normalized()
+	var lane_entry := _edge_stop_center(edge, intersection) + perpendicular_v * offset
+
 	var to_local: Transform3D = lane.global_transform.affine_inverse()
 	var curve := Curve3D.new()
+	curve.add_point(to_local * lane_entry)
 	curve.add_point(to_local * intersection.global_transform.origin)
-	curve.add_point(to_local * _edge_stop_center(edge, intersection))
 	lane.curve = curve
 
 
