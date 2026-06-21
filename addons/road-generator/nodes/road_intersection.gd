@@ -269,6 +269,8 @@ func _rebuild() -> void:
 	_mesh.mesh = mesh
 	container._create_collisions(_mesh)
 
+	settings.generate_lanes(self, edge_points, container)
+
 
 func _do_roadmesh_creation():
 	var do_create := _should_add_mesh()

@@ -1175,6 +1175,13 @@ func force_assign_lanes() -> void:
 				continue
 			lanes.append(_rl)
 
+	# Then RoadLanes that are children of intersections
+	for _inter in get_intersections():
+		for _rl in _inter.get_children():
+			if not _rl is RoadLane:
+				continue
+			lanes.append(_rl)
+
 	# Now get loose, direct child RoadLanes of container
 	for _ch in get_children():
 		if not _ch is RoadLane:

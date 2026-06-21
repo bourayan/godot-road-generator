@@ -38,6 +38,20 @@ func generate_mesh(intersection: Node3D, edges: Array[RoadPoint], container: Roa
 	return null
 
 
+## @abstract
+## Generates the RoadLanes for the intersection, as children of the
+## [param intersection] node.
+##
+## Mirrors [generate_mesh]: triggered by the [RoadIntersection] during rebuild,
+## with the concrete subclass deciding the per-type lane connections.
+##
+## Edges MUST have been sorted by angle from intersection beforehand.
+##
+## Note: Cannot use [RoadIntersection] for `intersection` due to cyclic typing.
+func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: RoadContainer) -> void:
+	push_error("IntersectionSettings.generate_lanes() not implemented by child class.")
+
+
 ## Returns true if all the provided edges have sufficient distance
 ## from the intersection point to have proper mesh generation.
 ##

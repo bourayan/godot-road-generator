@@ -19,6 +19,9 @@ enum _IntersectNGonFacing {
 
 const SegGeo := preload("res://addons/road-generator/procgen/segment_geo.gd")
 
+const STOP_ROW_SIZE: float = 2.0  # TODO: make proportional to density
+const LANE_NAME_PREFIX := "RoadLane_"
+
 # ------------------------------------------------------------------------------
 #endregion
 #region Abstract overrides
@@ -40,6 +43,52 @@ func generate_mesh(intersection: Node3D, edges: Array[RoadPoint], container: Roa
 func get_min_distance_from_intersection_point(rp: RoadPoint) -> float:
 	# TODO TBD when mesh generation is implemented.
 	return 0.0
+
+
+func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: RoadContainer) -> void:
+	if not intersection.has_method("is_road_intersection"):
+		push_error("intersection is not an intersection node, skipping lane generation.")
+		return
+
+	var active_lanes: Array[RoadLane] = []
+	if not container.generate_ai_lanes:
+		_clear_generated_lanes(intersection, active_lanes)
+		return
+
+	var manager: RoadManager = container.get_manager()
+
+	for edge: RoadPoint in edges:
+		if not is_instance_valid(edge):
+			continue
+
+		var lane_name := "%s%s" % [LANE_NAME_PREFIX, edge.name]
+		var existing := intersection.get_node_or_null(lane_name)
+		var lane: RoadLane
+		if existing is RoadLane:
+			lane = existing
+		else:
+			lane = RoadLane.new()
+			intersection.add_child(lane)
+			lane.name = lane_name
+			lane.set_meta("_edit_lock_", true)
+			lane.auto_free_vehicles = container.auto_free_vehicles
+			if container.debug_scene_visible:
+				lane.owner = container.get_owner()
+		active_lanes.append(lane)
+
+		if container.ai_lane_group != "":
+			lane.add_to_group(container.ai_lane_group)
+		elif is_instance_valid(manager) and manager.ai_lane_group != "":
+			lane.add_to_group(manager.ai_lane_group)
+
+		_assign_edge_stub_curve(lane, edge, intersection)
+
+		lane.draw_in_editor = container.draw_lanes_editor
+		lane.draw_in_game = container.draw_lanes_game
+		lane.refresh_geom = true
+		lane.rebuild_geom()
+
+	_clear_generated_lanes(intersection, active_lanes)
 
 
 # ------------------------------------------------------------------------------
@@ -65,6 +114,37 @@ func _get_edge_facing(edge: RoadPoint, intersection: Node3D) -> _IntersectNGonFa
 	return facing
 
 
+## World-space center of an edge's stop line, where its lanes meet the intersection.
+func _edge_stop_center(edge: RoadPoint, intersection: Node3D) -> Vector3:
+	var facing: _IntersectNGonFacing = _get_edge_facing(edge, intersection)
+	var parallel_v: Vector3 = edge.global_transform.basis.z.normalized()
+	if facing == _IntersectNGonFacing.ORIGIN:
+		parallel_v = -parallel_v
+	return edge.global_transform.origin + parallel_v * STOP_ROW_SIZE
+
+
+## Straight line from the intersection center to the edge's stop line,
+## stored in the lane's local space.
+func _assign_edge_stub_curve(lane: RoadLane, edge: RoadPoint, intersection: Node3D) -> void:
+	var to_local: Transform3D = lane.global_transform.affine_inverse()
+	var curve := Curve3D.new()
+	curve.add_point(to_local * intersection.global_transform.origin)
+	curve.add_point(to_local * _edge_stop_center(edge, intersection))
+	lane.curve = curve
+
+
+## Frees previously generated lanes that are no longer active.
+func _clear_generated_lanes(intersection: Node3D, keep: Array[RoadLane]) -> void:
+	for child in intersection.get_children():
+		if not (child is RoadLane):
+			continue
+		if not str(child.name).begins_with(LANE_NAME_PREFIX):
+			continue
+		if keep.has(child):
+			continue
+		child.queue_free()
+
+
 ## Generates a triangles from shoulders to intersection point,
 ## and triangles from an edge's shoulders to the intersection point.
 ## The end result is a very low-poly n-gon.[br][br]
@@ -82,8 +162,6 @@ func _generate_debug_mesh(intersection: Node3D, edges: Array[RoadPoint], contain
 	const TOPSIDE_SMOOTHING_GROUP = 1
 	surface_tool.set_smooth_group(TOPSIDE_SMOOTHING_GROUP)
 
-	const STOP_ROW_SIZE: float = 2.0  # TODO: make proportional to density
-	
 	# First, add an additional row of quads to each edge,
 	# to give a UV space for stop marks or other markings.
 	# We also prepare the intersection by storing appropriate
