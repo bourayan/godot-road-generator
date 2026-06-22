@@ -156,8 +156,9 @@ func test_lanes_have_curve_points():
 
 	container.rebuild_segments(true)
 
+	# RoadPoint, stop line, opposite stop line, opposite RoadPoint.
 	for lane in _lanes(inter):
-		assert_eq(lane.curve.point_count, 2, "Lane has start and end points")
+		assert_eq(lane.curve.point_count, 4, "Lane runs RoadPoint to RoadPoint via its stop lines")
 
 
 func test_straight_through_lane_crosses_intersection():
@@ -173,6 +174,23 @@ func test_straight_through_lane_crosses_intersection():
 	var lane_end := lane.get_lane_end()
 	assert_almost_eq(lane_start.x, lane_end.x, 0.01, "Through lane keeps a constant offset")
 	assert_true(lane_start.z < 0.0 and lane_end.z > 0.0, "Through lane spans both edges")
+
+
+func test_through_lane_reaches_road_points():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	var inter := _make_intersection(container)
+
+	container.rebuild_segments(true)
+
+	var lane: RoadLane = inter.get_node("RoadLane_p1_R0")
+	var p1: RoadPoint = container.get_node("p1")
+	var p2: RoadPoint = container.get_node("p2")
+	assert_almost_eq(lane.get_lane_start().z, p1.global_transform.origin.z, 0.01,
+			"Lane starts at the entry RoadPoint, not the stop line")
+	assert_almost_eq(lane.get_lane_end().z, p2.global_transform.origin.z, 0.01,
+			"Lane ends at the exit RoadPoint, not the stop line")
 
 
 func test_straight_through_keeps_tag():
@@ -205,7 +223,7 @@ func test_mismatched_lane_counts_merge():
 
 	assert_eq(_lanes_for_edge(inter, "p1").size(), 3, "All entering lanes generated")
 	for lane in _lanes_for_edge(inter, "p1"):
-		assert_eq(lane.curve.point_count, 2, "Each lane is routed")
+		assert_eq(lane.curve.point_count, 4, "Each lane is routed")
 	var extra: RoadLane = inter.get_node("RoadLane_p1_R2")
 	assert_eq(extra.lane_next_tag, "R1", "Surplus lane merges into the outer exit lane")
 
