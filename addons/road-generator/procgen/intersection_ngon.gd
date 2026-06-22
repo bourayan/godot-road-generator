@@ -46,10 +46,6 @@ func get_min_distance_from_intersection_point(rp: RoadPoint) -> float:
 
 
 func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: RoadContainer) -> void:
-	if not intersection.has_method("is_road_intersection"):
-		push_error("intersection is not an intersection node, skipping lane generation.")
-		return
-
 	var active_lanes: Array[RoadLane] = []
 	if not container.generate_ai_lanes:
 		_clear_generated_lanes(intersection, active_lanes)
