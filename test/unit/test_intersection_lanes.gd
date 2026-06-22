@@ -64,8 +64,10 @@ func test_entering_lane_tags():
 
 	container.rebuild_segments(true)
 
-	assert_eq(_tags(_lanes_for_edge(inter, "p1")), ["F0", "F1"], "Forward edge tags")
-	assert_eq(_tags(_lanes_for_edge(inter, "p2")), ["R0", "R1"], "Reverse edge tags")
+	# p1 connects on its next side, so the lanes travelling toward the
+	# intersection (and through it) are its reverse lanes; p2 the forward ones.
+	assert_eq(_tags(_lanes_for_edge(inter, "p1")), ["R0", "R1"], "Entering edge tags")
+	assert_eq(_tags(_lanes_for_edge(inter, "p2")), ["F0", "F1"], "Entering edge tags")
 
 
 func test_variable_lane_counts():
@@ -73,19 +75,19 @@ func test_variable_lane_counts():
 	add_child(container)
 	container.generate_ai_lanes = true
 	var inter := _make_intersection(container)
-	# Edge p1 enters the intersection forward; give it three forward lanes.
+	# Edge p1 enters the intersection on its reverse lanes; give it three.
 	var p1: RoadPoint = container.get_node("p1")
 	p1.traffic_dir = [
 		RoadPoint.LaneDir.REVERSE,
-		RoadPoint.LaneDir.FORWARD,
-		RoadPoint.LaneDir.FORWARD,
+		RoadPoint.LaneDir.REVERSE,
+		RoadPoint.LaneDir.REVERSE,
 		RoadPoint.LaneDir.FORWARD,
 	]
 
 	container.rebuild_segments(true)
 
-	assert_eq(_lanes_for_edge(inter, "p1").size(), 3, "Three entering forward lanes")
-	assert_eq(_lanes_for_edge(inter, "p2").size(), 2, "Two entering reverse lanes")
+	assert_eq(_lanes_for_edge(inter, "p1").size(), 3, "Three entering reverse lanes")
+	assert_eq(_lanes_for_edge(inter, "p2").size(), 2, "Two entering forward lanes")
 
 
 func test_no_lanes_when_generation_disabled():
@@ -146,7 +148,7 @@ func test_straight_through_lane_crosses_intersection():
 
 	container.rebuild_segments(true)
 
-	var lane: RoadLane = inter.get_node("RoadLane_p1_F0")
+	var lane: RoadLane = inter.get_node("RoadLane_p1_R0")
 	var lane_start := lane.get_lane_start()
 	var lane_end := lane.get_lane_end()
 	assert_almost_eq(lane_start.x, lane_end.x, 0.01, "Through lane keeps a constant offset")
@@ -161,8 +163,8 @@ func test_straight_through_keeps_tag():
 
 	container.rebuild_segments(true)
 
-	var lane: RoadLane = inter.get_node("RoadLane_p1_F0")
-	assert_eq(lane.lane_next_tag, "F0", "Straight-through lane exits with the same tag")
+	var lane: RoadLane = inter.get_node("RoadLane_p1_R0")
+	assert_eq(lane.lane_next_tag, "R0", "Straight-through lane exits with the same tag")
 
 
 func test_mismatched_lane_counts_merge():
@@ -170,12 +172,12 @@ func test_mismatched_lane_counts_merge():
 	add_child(container)
 	container.generate_ai_lanes = true
 	var inter := _make_intersection(container)
-	# Three forward entering lanes feeding into two exit lanes opposite.
+	# Three entering lanes feeding into two exit lanes opposite.
 	var p1: RoadPoint = container.get_node("p1")
 	p1.traffic_dir = [
 		RoadPoint.LaneDir.REVERSE,
-		RoadPoint.LaneDir.FORWARD,
-		RoadPoint.LaneDir.FORWARD,
+		RoadPoint.LaneDir.REVERSE,
+		RoadPoint.LaneDir.REVERSE,
 		RoadPoint.LaneDir.FORWARD,
 	]
 
@@ -184,8 +186,8 @@ func test_mismatched_lane_counts_merge():
 	assert_eq(_lanes_for_edge(inter, "p1").size(), 3, "All entering lanes generated")
 	for lane in _lanes_for_edge(inter, "p1"):
 		assert_eq(lane.curve.point_count, 2, "Each lane is routed")
-	var extra: RoadLane = inter.get_node("RoadLane_p1_F2")
-	assert_eq(extra.lane_next_tag, "F1", "Surplus lane merges into the outer exit lane")
+	var extra: RoadLane = inter.get_node("RoadLane_p1_R2")
+	assert_eq(extra.lane_next_tag, "R1", "Surplus lane merges into the outer exit lane")
 
 
 func test_colinear_lane_stays_straight():
@@ -196,7 +198,7 @@ func test_colinear_lane_stays_straight():
 
 	container.rebuild_segments(true)
 
-	var lane: RoadLane = inter.get_node("RoadLane_p1_F0")
+	var lane: RoadLane = inter.get_node("RoadLane_p1_R0")
 	var chord := lane.get_lane_start().distance_to(lane.get_lane_end())
 	assert_almost_eq(lane.curve.get_baked_length(), chord, 0.1, "Colinear lane has no bulge")
 
@@ -212,7 +214,7 @@ func test_offset_lane_arcs_between_edges():
 
 	container.rebuild_segments(true)
 
-	var lane: RoadLane = inter.get_node("RoadLane_p1_F0")
+	var lane: RoadLane = inter.get_node("RoadLane_p1_R0")
 	var chord := lane.get_lane_start().distance_to(lane.get_lane_end())
 	assert_gt(lane.curve.get_baked_length(), chord + 0.5, "Offset lane curves rather than cutting straight")
 
@@ -277,13 +279,13 @@ func test_divider_alignment_shifts_lane_offset():
 
 	p1.alignment = RoadPoint.Alignment.GEOMETRIC
 	container.rebuild_segments(true)
-	var geometric_x: float = (inter.get_node("RoadLane_p1_F0") as RoadLane).get_lane_start().x
+	var geometric_x: float = (inter.get_node("RoadLane_p1_R0") as RoadLane).get_lane_start().x
 
 	p1.alignment = RoadPoint.Alignment.DIVIDER
 	container.rebuild_segments(true)
-	var divider_x: float = (inter.get_node("RoadLane_p1_F0") as RoadLane).get_lane_start().x
+	var divider_x: float = (inter.get_node("RoadLane_p1_R0") as RoadLane).get_lane_start().x
 
-	assert_almost_eq(divider_x - geometric_x, 4.0, 0.01, "Divider shifts forward lanes by one lane width")
+	assert_almost_eq(divider_x - geometric_x, 4.0, 0.01, "Divider shifts entering lanes by one lane width")
 
 
 func test_editable_lane_preserved_on_rebuild():
@@ -293,7 +295,7 @@ func test_editable_lane_preserved_on_rebuild():
 	var inter := _make_intersection(container)
 	container.rebuild_segments(true)
 
-	var lane: RoadLane = inter.get_node("RoadLane_p1_F0")
+	var lane: RoadLane = inter.get_node("RoadLane_p1_R0")
 	lane.owner = container
 	var custom := Curve3D.new()
 	custom.add_point(Vector3(99, 0, 0))

@@ -146,11 +146,11 @@ func _edge_stop_center(edge: RoadPoint, intersection: Node3D) -> Vector3:
 
 
 func _entering_dir(facing: _IntersectNGonFacing) -> int:
-	return RoadPoint.LaneDir.FORWARD if facing == _IntersectNGonFacing.AWAY else RoadPoint.LaneDir.REVERSE
+	return RoadPoint.LaneDir.REVERSE if facing == _IntersectNGonFacing.AWAY else RoadPoint.LaneDir.FORWARD
 
 
 func _exiting_dir(facing: _IntersectNGonFacing) -> int:
-	return RoadPoint.LaneDir.REVERSE if facing == _IntersectNGonFacing.AWAY else RoadPoint.LaneDir.FORWARD
+	return RoadPoint.LaneDir.FORWARD if facing == _IntersectNGonFacing.AWAY else RoadPoint.LaneDir.REVERSE
 
 
 ## Lanes of the given direction on an edge, ordered from the centerline outward,
