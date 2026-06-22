@@ -226,6 +226,14 @@ func sort_branches() -> void:
 		_sort_edges_clockwise()
 
 
+## Match the draw settings of generated lanes to the container's settings.
+func update_lane_visibility() -> void:
+	for child in get_children():
+		if child is RoadLane:
+			child.draw_in_editor = container.draw_lanes_editor
+			child.draw_in_game = container.draw_lanes_game
+
+
 ## Check if mesh needs to be rebuilt.[br][br]
 ##
 ## Returns true if rebuild was done, else (including if invalid) false.

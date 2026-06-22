@@ -442,6 +442,8 @@ func _set_draw_lanes_editor(value: bool):
 		if not generate_ai_lanes:
 			seg.clear_lane_segments()
 		seg.update_lane_visibility() # could still have some manually added
+	for inter in get_intersections():
+		inter.update_lane_visibility()
 
 
 func _get_draw_lanes_editor() -> bool:
@@ -452,6 +454,8 @@ func _set_draw_lanes_game(value: bool):
 	_draw_lanes_game = value
 	for seg in get_segments():
 		seg.update_lane_visibility()
+	for inter in get_intersections():
+		inter.update_lane_visibility()
 
 
 func _get_draw_lanes_game() -> bool:

@@ -90,6 +90,26 @@ func test_variable_lane_counts():
 	assert_eq(_lanes_for_edge(inter, "p2").size(), 2, "Two entering forward lanes")
 
 
+func test_lane_visibility_follows_container():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	var inter := _make_intersection(container)
+	container.rebuild_segments(true)
+
+	container.draw_lanes_editor = true
+	container.draw_lanes_game = false
+	for lane in _lanes(inter):
+		assert_true(lane.draw_in_editor, "Editor draw follows container")
+		assert_false(lane.draw_in_game, "Game draw follows container")
+
+	container.draw_lanes_editor = false
+	container.draw_lanes_game = true
+	for lane in _lanes(inter):
+		assert_false(lane.draw_in_editor, "Editor draw toggles off with container")
+		assert_true(lane.draw_in_game, "Game draw toggles on with container")
+
+
 func test_no_lanes_when_generation_disabled():
 	var container = autoqfree(RoadContainer.new())
 	add_child(container)
