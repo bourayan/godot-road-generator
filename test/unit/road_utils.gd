@@ -97,3 +97,41 @@ func create_intersection_four_branch(container):
 	pw.next_pt_init = pw.get_path_to(i1)
 
 	container.update_edges()
+
+
+## Creates a three-branch T: pw and pe form a straight bar across the
+## intersection, and ps is the stem with no edge opposite it.
+func create_intersection_three_branch(container):
+	container.setup_road_container()
+
+	assert_eq(container.get_child_count(), 0, "No initial point children")
+
+	var i1 = autoqfree(RoadIntersection.new())
+	var pw = autoqfree(RoadPoint.new())
+	var pe = autoqfree(RoadPoint.new())
+	var ps = autoqfree(RoadPoint.new())
+	pw.name = "pw"
+	pe.name = "pe"
+	ps.name = "ps"
+
+	container.add_child(i1)
+	container.add_child(pw)
+	container.add_child(pe)
+	container.add_child(ps)
+
+	pw.position = Vector3(-10, 0, 0)
+	pe.position = Vector3(10, 0, 0)
+	ps.position = Vector3(0, 0, 10)
+	# Rotate each edge so its forward axis points at the center.
+	pw.rotation_degrees.y = 90
+	pe.rotation_degrees.y = -90
+	ps.rotation_degrees.y = 180
+
+	var edges: Array[RoadPoint] = [pw, pe, ps]
+	i1.edge_points = edges
+
+	pw.next_pt_init = pw.get_path_to(i1)
+	pe.next_pt_init = pe.get_path_to(i1)
+	ps.next_pt_init = ps.get_path_to(i1)
+
+	container.update_edges()

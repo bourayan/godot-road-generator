@@ -343,3 +343,66 @@ func test_editable_lane_preserved_on_rebuild():
 	container.rebuild_segments(true)
 
 	assert_eq(lane.curve.get_point_position(0), Vector3(99, 0, 0), "User-edited lane is left intact")
+
+
+# ------------------------------------------------------------------------------
+
+
+func _make_t_junction(container) -> RoadIntersection:
+	container.setup_road_container()
+	road_util.create_intersection_three_branch(container)
+	return container.get_intersections()[0]
+
+
+func test_t_junction_bar_edges_pair_through():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	var inter := _make_t_junction(container)
+
+	container.rebuild_segments(true)
+
+	# pw and pe form the straight bar, so each carries its entering lanes across.
+	var lane: RoadLane = inter.get_node("RoadLane_pw_R0")
+	assert_eq(lane.curve.point_count, 4, "Through lane runs RoadPoint to RoadPoint")
+	assert_true(lane.get_lane_start().x < 0.0 and lane.get_lane_end().x > 0.0,
+			"Through lane spans both bar edges")
+
+
+func test_t_junction_stem_has_no_through_lane():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	var inter := _make_t_junction(container)
+
+	container.rebuild_segments(true)
+
+	# The stem has no edge opposite it, so it must not emit a through lane.
+	assert_null(inter.get_node_or_null("RoadLane_ps_R0"), "Stem emits no through lane")
+	assert_null(inter.get_node_or_null("RoadLane_ps_R1"), "Stem emits no through lane")
+
+
+func test_t_junction_stem_turns_to_bar_edges():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	var inter := _make_t_junction(container)
+
+	container.rebuild_segments(true)
+
+	# Lacking a through lane, the stem still reaches each bar edge as a turn.
+	assert_not_null(_turn_lane_to(inter, "ps", "pw"), "Stem turns toward pw")
+	assert_not_null(_turn_lane_to(inter, "ps", "pe"), "Stem turns toward pe")
+
+
+func test_t_junction_lane_count():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	var inter := _make_t_junction(container)
+
+	container.rebuild_segments(true)
+
+	# Bar edges: two through lanes plus a turn to the stem apiece (3 each); stem:
+	# a turn to each bar edge (2).
+	assert_eq(_lanes(inter).size(), 8, "Through and turn lanes for the T")

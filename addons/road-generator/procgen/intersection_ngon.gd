@@ -52,6 +52,7 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 		return
 
 	var manager: RoadManager = container.get_manager()
+	var paired := _compute_edge_pairs(edges, intersection)
 
 	for i in range(edges.size()):
 		var edge: RoadPoint = edges[i]
@@ -64,29 +65,31 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 		if entering.is_empty():
 			continue
 		var entry_dir := _edge_inward_dir(edge, intersection)
-		var opposite := _opposite_edge(edges, i, intersection)
+		var partner: int = paired[i]
 
-		# Through lanes: every entering lane continues to the opposite edge.
-		var exiting := _opposite_exit_lanes(edges, i, intersection)
-		for k in range(entering.size()):
-			var src: Dictionary = entering[k]
-			var entry := _lane_stop_position(edge, intersection, src["index"])
-			var exit_point := intersection.global_transform.origin
-			var exit_dir := entry_dir
-			var next_tag := ""
-			if not exiting.is_empty():
-				var target: Dictionary = exiting[mini(k, exiting.size() - 1)]
-				exit_point = _lane_stop_position(target["edge"], intersection, target["index"])
-				exit_dir = -_edge_inward_dir(target["edge"], intersection)
-				next_tag = target["tag"]
-			var lane_name := "%s%s_%s" % [LANE_NAME_PREFIX, edge.name, src["tag"]]
-			_emit_lane(intersection, container, manager, active_lanes, lane_name,
-					src["tag"], next_tag, entry, entry_dir, exit_point, exit_dir,
-					not exiting.is_empty())
+		# Through lanes: paired edges carry every entering lane straight across to
+		# their partner. An unpaired edge emits no through lane.
+		if partner >= 0:
+			var exiting := _edge_exit_lanes(edges[partner], intersection)
+			for k in range(entering.size()):
+				var src: Dictionary = entering[k]
+				var entry := _lane_stop_position(edge, intersection, src["index"])
+				var exit_point := intersection.global_transform.origin
+				var exit_dir := entry_dir
+				var next_tag := ""
+				if not exiting.is_empty():
+					var target: Dictionary = exiting[mini(k, exiting.size() - 1)]
+					exit_point = _lane_stop_position(target["edge"], intersection, target["index"])
+					exit_dir = -_edge_inward_dir(target["edge"], intersection)
+					next_tag = target["tag"]
+				var lane_name := "%s%s_%s" % [LANE_NAME_PREFIX, edge.name, src["tag"]]
+				_emit_lane(intersection, container, manager, active_lanes, lane_name,
+						src["tag"], next_tag, entry, entry_dir, exit_point, exit_dir,
+						not exiting.is_empty())
 
 		# Turn lanes: the turn-side entering lane reaches each remaining edge.
 		for j in range(edges.size()):
-			if j == i or j == opposite or not is_instance_valid(edges[j]):
+			if j == i or j == partner or not is_instance_valid(edges[j]):
 				continue
 			var target_edge: RoadPoint = edges[j]
 			var target_facing: _IntersectNGonFacing = _get_edge_facing(target_edge, intersection)
@@ -172,38 +175,59 @@ func _directional_lanes(edge: RoadPoint, dir: int) -> Array:
 	return result
 
 
-## Exit lanes of the edge most directly opposite the one at `index`, tagged with
-## the edge they belong to so a through lane can target them.
-func _opposite_exit_lanes(edges: Array[RoadPoint], index: int, intersection: Node3D) -> Array:
-	var opposite := _opposite_edge(edges, index, intersection)
-	if opposite < 0:
-		return []
-	var opposite_edge: RoadPoint = edges[opposite]
-	var facing: _IntersectNGonFacing = _get_edge_facing(opposite_edge, intersection)
+## Exit lanes available on an edge, tagged with the edge they belong to so a
+## through lane can target them.
+func _edge_exit_lanes(edge: RoadPoint, intersection: Node3D) -> Array:
+	var facing: _IntersectNGonFacing = _get_edge_facing(edge, intersection)
 	if facing == _IntersectNGonFacing.OTHER:
 		return []
-	var lanes := _directional_lanes(opposite_edge, _exiting_dir(facing))
+	var lanes := _directional_lanes(edge, _exiting_dir(facing))
 	for lane in lanes:
-		lane["edge"] = opposite_edge
+		lane["edge"] = edge
 	return lanes
 
 
-## Index of the edge whose direction from the intersection is most opposed to
-## the edge at `index`, or -1 if none.
-func _opposite_edge(edges: Array[RoadPoint], index: int, intersection: Node3D) -> int:
+## True when the edge at `index` is a valid, intersection-facing edge eligible
+## to take part in lane matching.
+func _edge_is_eligible(edges: Array[RoadPoint], index: int, intersection: Node3D) -> bool:
+	if not is_instance_valid(edges[index]):
+		return false
+	return _get_edge_facing(edges[index], intersection) != _IntersectNGonFacing.OTHER
+
+
+## Pairs each edge with the one across the intersection it points most directly
+## at (smallest angle from dead-ahead, regardless of distance). Two edges are
+## paired only when they choose each other; the returned array holds each edge's
+## partner index, or -1 when it has none. Resolved without recursion, so the
+## pairing never depends on evaluation order.
+func _compute_edge_pairs(edges: Array[RoadPoint], intersection: Node3D) -> Array[int]:
 	var origin := intersection.global_transform.origin
-	var dir_index := (edges[index].global_transform.origin - origin).normalized()
-	var best := -1
-	var best_dot := INF
-	for j in range(edges.size()):
-		if j == index or not is_instance_valid(edges[j]):
+	var count := edges.size()
+	var primary: Array[int] = []
+	primary.resize(count)
+	primary.fill(-1)
+	for i in range(count):
+		if not _edge_is_eligible(edges, i, intersection):
 			continue
-		var dir_other := (edges[j].global_transform.origin - origin).normalized()
-		var dot := dir_index.dot(dir_other)
-		if dot < best_dot:
-			best_dot = dot
-			best = j
-	return best
+		var dir_i := (edges[i].global_transform.origin - origin).normalized()
+		var best := -1
+		var best_dot := INF
+		for j in range(count):
+			if j == i or not _edge_is_eligible(edges, j, intersection):
+				continue
+			var dot := dir_i.dot((edges[j].global_transform.origin - origin).normalized())
+			if dot < best_dot:
+				best_dot = dot
+				best = j
+		primary[i] = best
+	var paired: Array[int] = []
+	paired.resize(count)
+	paired.fill(-1)
+	for i in range(count):
+		var choice := primary[i]
+		if choice >= 0 and primary[choice] == i:
+			paired[i] = choice
+	return paired
 
 
 ## True if the target edge lies clockwise (to the right) of the edge's inbound
