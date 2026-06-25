@@ -225,12 +225,14 @@ func _compute_edge_primaries(edges: Array[RoadPoint], intersection: Node3D) -> A
 
 
 ## True if the target edge lies clockwise (to the right) of the edge's inbound
-## direction about the intersection's up axis.
+## direction about the intersection's up axis. A right turn sources from the
+## outer entering lane; a left turn from the inner (divider-side) lane.
 func _turn_is_clockwise(edge: RoadPoint, target: RoadPoint, intersection: Node3D) -> bool:
 	var up: Vector3 = intersection.global_transform.basis.y.normalized()
 	var inward := _edge_inward_dir(edge, intersection)
 	var to_target := (target.global_transform.origin - intersection.global_transform.origin).normalized()
-	return inward.signed_angle_to(to_target, up) > 0.0
+	# Around +Y, a right turn yields a negative signed angle from inbound to target.
+	return inward.signed_angle_to(to_target, up) < 0.0
 
 
 ## Finds an existing generated lane by name or creates one, ensuring group

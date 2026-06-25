@@ -302,6 +302,31 @@ func test_four_way_turn_lane_reaches_target_edge():
 	assert_gt(turn.curve.get_baked_length(), chord + 0.5, "Turn lane arcs around the corner")
 
 
+func test_four_way_turn_handedness():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	container.setup_road_container()
+	road_util.create_intersection_four_branch(container)
+	var inter: RoadIntersection = container.get_intersections()[0]
+
+	container.rebuild_segments(true)
+
+	# From the north edge heading south, west (pw) is the right turn and east
+	# (pe) the left turn. Right turns source from the outer (curb-side) lane,
+	# left turns from the inner (divider-side) lane.
+	var right_turn := _turn_lane_to(inter, "pn", "pw")
+	var left_turn := _turn_lane_to(inter, "pn", "pe")
+	assert_not_null(right_turn, "Right turn pn->pw exists")
+	assert_not_null(left_turn, "Left turn pn->pe exists")
+	if right_turn == null or left_turn == null:
+		return
+	# pn's entering lanes lie on the west (-X) half; the outer/right lane sits
+	# further from the centerline than the inner/left lane.
+	assert_lt(right_turn.get_lane_start().x, left_turn.get_lane_start().x,
+			"Right turn sources from the outer lane, left turn from the inner lane")
+
+
 func test_divider_alignment_shifts_lane_offset():
 	var container = autoqfree(RoadContainer.new())
 	add_child(container)
