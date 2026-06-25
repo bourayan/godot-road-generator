@@ -52,7 +52,7 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 		return
 
 	var manager: RoadManager = container.get_manager()
-	var paired := _compute_edge_pairs(edges, intersection)
+	var primaries := _compute_edge_primaries(edges, intersection)
 
 	for i in range(edges.size()):
 		var edge: RoadPoint = edges[i]
@@ -65,12 +65,13 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 		if entering.is_empty():
 			continue
 		var entry_dir := _edge_inward_dir(edge, intersection)
-		var partner: int = paired[i]
+		var primary: int = primaries[i]
 
-		# Through lanes: paired edges carry every entering lane straight across to
-		# their partner. An unpaired edge emits no through lane.
-		if partner >= 0:
-			var exiting := _edge_exit_lanes(edges[partner], intersection)
+		# Through lanes: every entering lane routes straight across to this edge's
+		# primary target. Surplus lanes merge onto its outermost exit lane, built
+		# from the divider outward.
+		if primary >= 0:
+			var exiting := _edge_exit_lanes(edges[primary], intersection)
 			for k in range(entering.size()):
 				var src: Dictionary = entering[k]
 				var entry := _lane_stop_position(edge, intersection, src["index"])
@@ -89,7 +90,7 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 
 		# Turn lanes: the turn-side entering lane reaches each remaining edge.
 		for j in range(edges.size()):
-			if j == i or j == partner or not is_instance_valid(edges[j]):
+			if j == i or j == primary or not is_instance_valid(edges[j]):
 				continue
 			var target_edge: RoadPoint = edges[j]
 			var target_facing: _IntersectNGonFacing = _get_edge_facing(target_edge, intersection)
@@ -195,12 +196,12 @@ func _edge_is_eligible(edges: Array[RoadPoint], index: int, intersection: Node3D
 	return _get_edge_facing(edges[index], intersection) != _IntersectNGonFacing.OTHER
 
 
-## Pairs each edge with the one across the intersection it points most directly
-## at (smallest angle from dead-ahead, regardless of distance). Two edges are
-## paired only when they choose each other; the returned array holds each edge's
-## partner index, or -1 when it has none. Resolved without recursion, so the
-## pairing never depends on evaluation order.
-func _compute_edge_pairs(edges: Array[RoadPoint], intersection: Node3D) -> Array[int]:
+## Picks each edge's primary target: the edge across the intersection it points
+## most directly at (smallest angle from dead-ahead, regardless of distance).
+## The returned array holds each edge's primary index, or -1 when it has none.
+## Every eligible edge routes its entering lanes through to its primary, whether
+## or not the choice is reciprocated.
+func _compute_edge_primaries(edges: Array[RoadPoint], intersection: Node3D) -> Array[int]:
 	var origin := intersection.global_transform.origin
 	var count := edges.size()
 	var primary: Array[int] = []
@@ -220,14 +221,7 @@ func _compute_edge_pairs(edges: Array[RoadPoint], intersection: Node3D) -> Array
 				best_dot = dot
 				best = j
 		primary[i] = best
-	var paired: Array[int] = []
-	paired.resize(count)
-	paired.fill(-1)
-	for i in range(count):
-		var choice := primary[i]
-		if choice >= 0 and primary[choice] == i:
-			paired[i] = choice
-	return paired
+	return primary
 
 
 ## True if the target edge lies clockwise (to the right) of the edge's inbound

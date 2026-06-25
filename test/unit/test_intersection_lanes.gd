@@ -369,7 +369,7 @@ func test_t_junction_bar_edges_pair_through():
 			"Through lane spans both bar edges")
 
 
-func test_t_junction_stem_has_no_through_lane():
+func test_t_junction_stem_routes_through_to_primary():
 	var container = autoqfree(RoadContainer.new())
 	add_child(container)
 	container.generate_ai_lanes = true
@@ -377,12 +377,13 @@ func test_t_junction_stem_has_no_through_lane():
 
 	container.rebuild_segments(true)
 
-	# The stem has no edge opposite it, so it must not emit a through lane.
-	assert_null(inter.get_node_or_null("RoadLane_ps_R0"), "Stem emits no through lane")
-	assert_null(inter.get_node_or_null("RoadLane_ps_R1"), "Stem emits no through lane")
+	# Incoming lanes always connect to the primary, even on the stem: both of its
+	# entering lanes route through to pw (the bar edge it points most directly at).
+	assert_not_null(inter.get_node_or_null("RoadLane_ps_R0"), "Stem routes to its primary")
+	assert_not_null(inter.get_node_or_null("RoadLane_ps_R1"), "Stem routes to its primary")
 
 
-func test_t_junction_stem_turns_to_bar_edges():
+func test_t_junction_stem_turns_to_non_primary_bar():
 	var container = autoqfree(RoadContainer.new())
 	add_child(container)
 	container.generate_ai_lanes = true
@@ -390,9 +391,10 @@ func test_t_junction_stem_turns_to_bar_edges():
 
 	container.rebuild_segments(true)
 
-	# Lacking a through lane, the stem still reaches each bar edge as a turn.
-	assert_not_null(_turn_lane_to(inter, "ps", "pw"), "Stem turns toward pw")
-	assert_not_null(_turn_lane_to(inter, "ps", "pe"), "Stem turns toward pe")
+	# pw is the stem's primary (taken as a through lane); the other bar edge pe is
+	# reached as a turn.
+	assert_not_null(_turn_lane_to(inter, "ps", "pe"), "Stem turns toward the non-primary bar")
+	assert_null(_turn_lane_to(inter, "ps", "pw"), "Primary bar is a through lane, not a turn")
 
 
 func test_t_junction_lane_count():
@@ -404,5 +406,5 @@ func test_t_junction_lane_count():
 	container.rebuild_segments(true)
 
 	# Bar edges: two through lanes plus a turn to the stem apiece (3 each); stem:
-	# a turn to each bar edge (2).
-	assert_eq(_lanes(inter).size(), 8, "Through and turn lanes for the T")
+	# two through lanes to its primary plus a turn to the other bar (3).
+	assert_eq(_lanes(inter).size(), 9, "Through and turn lanes for the T")
