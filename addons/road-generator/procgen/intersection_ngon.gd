@@ -196,13 +196,23 @@ func _edge_is_eligible(edges: Array[RoadPoint], index: int, intersection: Node3D
 	return _get_edge_facing(edges[index], intersection) != _IntersectNGonFacing.OTHER
 
 
-## Picks each edge's primary target: the edge across the intersection it points
-## most directly at (smallest angle from dead-ahead, regardless of distance).
-## The returned array holds each edge's primary index, or -1 when it has none.
-## Every eligible edge routes its entering lanes through to its primary, whether
-## or not the choice is reciprocated.
+## Meters of lateral error treated as equivalent to one radian of facing
+## misalignment when scoring primary candidates. Lateral offset is weighted more
+## heavily than angle, so a candidate the source aims squarely at is preferred
+## over one that merely faces back from off to the side.
+const _PRIMARY_ANGLE_WEIGHT: float = 6.0
+## Error added to a candidate sitting beside or behind the source, ruling out
+## same-side edges as through partners.
+const _PRIMARY_BEHIND_PENALTY: float = 1.0e6
+
+## Picks each edge's primary target with a projection loss: cast the edge's
+## travel ray forward through the intersection and score every other edge by how
+## far it sits laterally from that ray (it should lie dead ahead) blended with how
+## head-on the two roads face (their travel directions should oppose). Lowest
+## combined error wins, so both position and facing rotation count. The returned
+## array holds each edge's primary index, or -1 when it has none. Every eligible
+## edge routes its entering lanes through to its primary, reciprocated or not.
 func _compute_edge_primaries(edges: Array[RoadPoint], intersection: Node3D) -> Array[int]:
-	var origin := intersection.global_transform.origin
 	var count := edges.size()
 	var primary: Array[int] = []
 	primary.resize(count)
@@ -210,15 +220,23 @@ func _compute_edge_primaries(edges: Array[RoadPoint], intersection: Node3D) -> A
 	for i in range(count):
 		if not _edge_is_eligible(edges, i, intersection):
 			continue
-		var dir_i := (edges[i].global_transform.origin - origin).normalized()
+		var origin_i := edges[i].global_transform.origin
+		var dir_i := _edge_inward_dir(edges[i], intersection)
 		var best := -1
-		var best_dot := INF
+		var best_loss := INF
 		for j in range(count):
 			if j == i or not _edge_is_eligible(edges, j, intersection):
 				continue
-			var dot := dir_i.dot((edges[j].global_transform.origin - origin).normalized())
-			if dot < best_dot:
-				best_dot = dot
+			var rel := edges[j].global_transform.origin - origin_i
+			var along := rel.dot(dir_i)
+			var lateral := (rel - dir_i * along).length()
+			var dir_j := _edge_inward_dir(edges[j], intersection)
+			var angle := acos(clampf(-dir_i.dot(dir_j), -1.0, 1.0))
+			var loss := lateral + _PRIMARY_ANGLE_WEIGHT * angle
+			if along <= 0.0:
+				loss += _PRIMARY_BEHIND_PENALTY
+			if loss < best_loss:
+				best_loss = loss
 				best = j
 		primary[i] = best
 	return primary

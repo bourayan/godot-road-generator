@@ -135,3 +135,43 @@ func create_intersection_three_branch(container):
 	ps.next_pt_init = ps.get_path_to(i1)
 
 	container.update_edges()
+
+
+## Creates an intersection that distinguishes facing-aware pairing from a
+## position-only one. The source ps aims south; pb sits nearly dead-opposite but
+## faces sideways, while pg sits off to the side yet faces ps head-on. A position
+## metric prefers pb; an orientation-aware one prefers pg.
+func create_intersection_facing_split(container):
+	container.setup_road_container()
+
+	assert_eq(container.get_child_count(), 0, "No initial point children")
+
+	var i1 = autoqfree(RoadIntersection.new())
+	var ps = autoqfree(RoadPoint.new())
+	var pg = autoqfree(RoadPoint.new())
+	var pb = autoqfree(RoadPoint.new())
+	ps.name = "ps"
+	pg.name = "pg"
+	pb.name = "pb"
+
+	container.add_child(i1)
+	container.add_child(ps)
+	container.add_child(pg)
+	container.add_child(pb)
+
+	ps.position = Vector3(0, 0, -10)
+	pg.position = Vector3(8, 0, 12)
+	pb.position = Vector3(1, 0, 12)
+	# ps aims south (+Z); pg faces back head-on (-Z); pb faces sideways (+X).
+	ps.rotation_degrees.y = 0
+	pg.rotation_degrees.y = 180
+	pb.rotation_degrees.y = 90
+
+	var edges: Array[RoadPoint] = [ps, pg, pb]
+	i1.edge_points = edges
+
+	ps.next_pt_init = ps.get_path_to(i1)
+	pg.next_pt_init = pg.get_path_to(i1)
+	pb.next_pt_init = pb.get_path_to(i1)
+
+	container.update_edges()

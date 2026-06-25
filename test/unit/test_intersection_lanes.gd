@@ -373,6 +373,28 @@ func test_editable_lane_preserved_on_rebuild():
 # ------------------------------------------------------------------------------
 
 
+func test_pairing_prefers_facing_over_position():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	container.setup_road_container()
+	road_util.create_intersection_facing_split(container)
+	var inter: RoadIntersection = container.get_intersections()[0]
+
+	container.rebuild_segments(true)
+
+	# ps routes through to pg, the edge that faces it head-on, rather than pb,
+	# which sits more directly opposite but points sideways.
+	assert_not_null(inter.get_node_or_null("RoadLane_ps_R0"), "Source emits a through lane")
+	var through: RoadLane = inter.get_node("RoadLane_ps_R0")
+	var pg: RoadPoint = container.get_node("pg")
+	var pb: RoadPoint = container.get_node("pb")
+	var ends_at := through.get_lane_end()
+	assert_lt(ends_at.distance_to(pg.global_transform.origin),
+			ends_at.distance_to(pb.global_transform.origin),
+			"Through lane reaches the head-on edge pg, not the dead-opposite pb")
+
+
 func _make_t_junction(container) -> RoadIntersection:
 	container.setup_road_container()
 	road_util.create_intersection_three_branch(container)
