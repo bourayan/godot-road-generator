@@ -99,7 +99,8 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 			var target_exit := _directional_lanes(target_edge, _exiting_dir(target_facing))
 			if target_exit.is_empty():
 				continue
-			var clockwise := _turn_is_clockwise(edge, target_edge, intersection)
+			var reference_edge: RoadPoint = edges[primary] if primary >= 0 else null
+			var clockwise := _turn_is_clockwise(edge, target_edge, reference_edge, intersection)
 			var turn_src: Dictionary = entering[entering.size() - 1] if clockwise else entering[0]
 			var turn_dst: Dictionary = target_exit[target_exit.size() - 1] if clockwise else target_exit[0]
 			var turn_entry := _lane_stop_position(edge, intersection, turn_src["index"])
@@ -242,15 +243,23 @@ func _compute_edge_primaries(edges: Array[RoadPoint], intersection: Node3D) -> A
 	return primary
 
 
-## True if the target edge lies clockwise (to the right) of the edge's inbound
-## direction about the intersection's up axis. A right turn sources from the
-## outer entering lane; a left turn from the inner (divider-side) lane.
-func _turn_is_clockwise(edge: RoadPoint, target: RoadPoint, intersection: Node3D) -> bool:
+## True if the target edge lies clockwise (to the right) of the straight-through
+## direction toward this edge's `reference` (primary) target. Measuring handedness
+## against the primary, rather than the raw inbound facing, ties every left/right
+## flip to the moment the edge's primary pairing changes, so a turn never crosses
+## traffic mid-rotation. Falls back to inbound facing when there is no primary.
+## A right turn sources from the outer entering lane; a left turn from the inner
+## (divider-side) lane.
+func _turn_is_clockwise(edge: RoadPoint, target: RoadPoint, reference: RoadPoint, intersection: Node3D) -> bool:
 	var up: Vector3 = intersection.global_transform.basis.y.normalized()
-	var inward := _edge_inward_dir(edge, intersection)
-	var to_target := (target.global_transform.origin - intersection.global_transform.origin).normalized()
-	# Around +Y, a right turn yields a negative signed angle from inbound to target.
-	return inward.signed_angle_to(to_target, up) < 0.0
+	var ahead: Vector3
+	if is_instance_valid(reference):
+		ahead = reference.global_transform.origin - edge.global_transform.origin
+	else:
+		ahead = _edge_inward_dir(edge, intersection)
+	var to_target := target.global_transform.origin - edge.global_transform.origin
+	# Around +Y, a right turn yields a negative signed angle from ahead to target.
+	return ahead.signed_angle_to(to_target, up) < 0.0
 
 
 ## Finds an existing generated lane by name or creates one, ensuring group

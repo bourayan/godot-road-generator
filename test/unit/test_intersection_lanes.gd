@@ -395,6 +395,26 @@ func test_pairing_prefers_facing_over_position():
 			"Through lane reaches the head-on edge pg, not the dead-opposite pb")
 
 
+func test_turn_handedness_follows_primary_not_inbound():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	container.setup_road_container()
+	road_util.create_intersection_facing_split(container)
+	var inter: RoadIntersection = container.get_intersections()[0]
+
+	container.rebuild_segments(true)
+
+	# ps routes through to pg (off to its right), leaving pb as a turn target that
+	# sits to the right of that through path. Handedness is measured against the
+	# primary, so the pb turn is a right turn sourced from the outer lane (R1),
+	# even though pb lies left of ps's raw inbound axis.
+	assert_not_null(inter.get_node_or_null("RoadLane_ps_R1_pb"),
+			"Turn to pb sources from the outer lane, right of the ps->pg primary")
+	assert_null(inter.get_node_or_null("RoadLane_ps_R0_pb"),
+			"Turn handedness is not taken from the raw inbound direction")
+
+
 func _make_t_junction(container) -> RoadIntersection:
 	container.setup_road_container()
 	road_util.create_intersection_three_branch(container)
