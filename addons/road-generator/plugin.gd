@@ -1474,6 +1474,10 @@ func make_roadlanes_editable_action(graph_nodes: Array) -> void:
 		for seg in segs:
 			undo_redo.add_do_method(seg, "generate_lane_segments")
 			undo_redo.add_undo_method(seg, "generate_lane_segments")
+		if parent is RoadIntersection:
+			undo_redo.add_do_method(parent, "refresh_intersection_mesh")
+			undo_redo.add_undo_method(parent, "refresh_intersection_mesh")
+
 		# TODO: Add the equivalent path for populating RoadLanes on intersections
 
 	undo_redo.commit_action()
