@@ -20,7 +20,6 @@ enum _IntersectNGonFacing {
 const SegGeo := preload("res://addons/road-generator/procgen/segment_geo.gd")
 
 const STOP_ROW_SIZE: float = 2.0  # TODO: make proportional to density
-const LANE_NAME_PREFIX := "RoadLane_"
 
 # ------------------------------------------------------------------------------
 #endregion
@@ -51,6 +50,7 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 		_clear_generated_lanes(intersection, active_lanes)
 		return
 
+	var used_names := {}
 	var manager: RoadManager = container.get_manager()
 	var primaries := _compute_edge_primaries(edges, intersection)
 
@@ -78,12 +78,14 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 				var exit_point := intersection.global_transform.origin
 				var exit_dir := entry_dir
 				var next_tag := ""
+				var merged := false
 				if not exiting.is_empty():
+					merged = k >= exiting.size()
 					var target: Dictionary = exiting[mini(k, exiting.size() - 1)]
 					exit_point = _lane_stop_position(target["edge"], intersection, target["index"])
 					exit_dir = -_edge_inward_dir(target["edge"], intersection)
 					next_tag = target["tag"]
-				var lane_name := "%s%s_%s" % [LANE_NAME_PREFIX, edge.name, src["tag"]]
+				var lane_name := _tagged_lane_name(used_names, edge.name, src["tag"], "r" if merged else "")
 				_emit_lane(intersection, container, manager, active_lanes, lane_name,
 						src["tag"], next_tag, entry, entry_dir, exit_point, exit_dir,
 						not exiting.is_empty())
@@ -106,7 +108,7 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 			var turn_entry := _lane_stop_position(edge, intersection, turn_src["index"])
 			var turn_exit := _lane_stop_position(target_edge, intersection, turn_dst["index"])
 			var turn_exit_dir := -_edge_inward_dir(target_edge, intersection)
-			var turn_name := "%s%s_%s_%s" % [LANE_NAME_PREFIX, edge.name, turn_src["tag"], target_edge.name]
+			var turn_name := _tagged_lane_name(used_names, edge.name, turn_src["tag"], "a")
 			_emit_lane(intersection, container, manager, active_lanes, turn_name,
 					turn_src["tag"], turn_dst["tag"], turn_entry, entry_dir, turn_exit, turn_exit_dir)
 
@@ -347,6 +349,22 @@ func _assign_through_curve(lane: RoadLane, intersection: Node3D, entry: Vector3,
 	else:
 		curve.add_point(exit_stop, -dir_out * handle, Vector3.ZERO)
 	lane.curve = curve
+
+
+## Builds a lane's tagged name in the segment-lane style, prefixed by the source
+## edge: `edge_pTAG_nTAG` for a straight through lane, with an `a` suffix for a
+## turn or `r` for an outer lane squeezed into a merge. A counter is appended when
+## a name would otherwise repeat (e.g. two turns off the same lane), keeping every
+## lane uniquely and stably named for reuse across rebuilds.
+func _tagged_lane_name(used: Dictionary, edge_name: String, tag: String, suffix: String) -> String:
+	var base := "%s_p%s_n%s%s" % [edge_name, tag, tag, suffix]
+	var lane_name := base
+	var counter := 2
+	while used.has(lane_name):
+		lane_name = "%s%d" % [base, counter]
+		counter += 1
+	used[lane_name] = true
+	return lane_name
 
 
 ## Frees previously generated lanes that are no longer active.
