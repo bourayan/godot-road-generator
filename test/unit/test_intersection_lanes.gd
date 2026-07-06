@@ -373,6 +373,27 @@ func test_editable_lane_preserved_on_rebuild():
 # ------------------------------------------------------------------------------
 
 
+func test_custom_editable_lane_not_deleted_on_rebuild():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	container.generate_ai_lanes = true
+	var inter := _make_intersection(container)
+	container.rebuild_segments(true)
+
+	# A lane the generator never produces (e.g. a hand-drawn U-turn), promoted to
+	# editable by giving it an owner, must survive a rebuild rather than being
+	# swept up with the stale generated lanes.
+	var custom := RoadLane.new()
+	inter.add_child(custom)
+	custom.name = "custom_uturn"
+	custom.owner = container
+
+	container.rebuild_segments(true)
+
+	assert_false(custom.is_queued_for_deletion(), "User-added editable lane survives rebuild")
+	assert_not_null(inter.get_node_or_null("custom_uturn"), "Custom lane still present after rebuild")
+
+
 func test_pairing_prefers_facing_over_position():
 	var container = autoqfree(RoadContainer.new())
 	add_child(container)

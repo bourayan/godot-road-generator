@@ -345,7 +345,7 @@ func _clear_generated_lanes(intersection: Node3D, keep: Array[RoadLane]) -> void
 	for child in intersection.get_children():
 		if not (child is RoadLane):
 			continue
-		if not str(child.name).begins_with(LANE_NAME_PREFIX):
+		if is_instance_valid(child.owner):
 			continue
 		if keep.has(child):
 			continue
