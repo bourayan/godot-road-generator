@@ -206,6 +206,15 @@ const _PRIMARY_ANGLE_WEIGHT: float = 6.0
 ## same-side edges as through partners.
 const _PRIMARY_BEHIND_PENALTY: float = 1.0e6
 
+## Perpendicular distance from `rel` to the ray along `dir`, scaled by lane width
+## so the lateral-vs-angle balance in pairing holds for roads built at any lane
+## size: a road with wide lanes spaces its edges proportionally wider, and without
+## this the inflated lateral distances would swamp the width-independent angle.
+func _pairing_lateral_cost(rel: Vector3, dir: Vector3, lane_width: float) -> float:
+	var along := rel.dot(dir)
+	return (rel - dir * along).length() * RoadPoint.DEFAULT_LANE_WIDTH / lane_width
+
+
 ## Picks each edge's primary target with a projection loss: cast the edge's
 ## travel ray forward through the intersection and score every other edge by how
 ## far it sits laterally from that ray (it should lie dead ahead) blended with how
@@ -230,7 +239,7 @@ func _compute_edge_primaries(edges: Array[RoadPoint], intersection: Node3D) -> A
 				continue
 			var rel := edges[j].global_transform.origin - origin_i
 			var along := rel.dot(dir_i)
-			var lateral := (rel - dir_i * along).length()
+			var lateral := _pairing_lateral_cost(rel, dir_i, edges[i].lane_width)
 			var dir_j := _edge_inward_dir(edges[j], intersection)
 			var angle := acos(clampf(-dir_i.dot(dir_j), -1.0, 1.0))
 			var loss := lateral + _PRIMARY_ANGLE_WEIGHT * angle

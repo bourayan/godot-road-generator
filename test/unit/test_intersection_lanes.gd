@@ -394,6 +394,20 @@ func test_custom_editable_lane_not_deleted_on_rebuild():
 	assert_not_null(inter.get_node_or_null("custom_uturn"), "Custom lane still present after rebuild")
 
 
+func test_pairing_lateral_cost_scales_with_lane_width():
+	# The pairing loss blends a lateral offset with a facing angle. Because a road
+	# built with wider lanes spaces its edges proportionally wider, the lateral
+	# term is divided by lane width so it stays comparable to the width-independent
+	# angle instead of swamping it on supersized roads.
+	var ngon := IntersectionNGon.new()
+	var rel := Vector3(6, 0, 10)
+	var dir := Vector3(0, 0, 1)
+	assert_almost_eq(ngon._pairing_lateral_cost(rel, dir, RoadPoint.DEFAULT_LANE_WIDTH), 6.0, 0.001,
+			"At the default lane width the cost is the raw perpendicular distance")
+	assert_almost_eq(ngon._pairing_lateral_cost(rel, dir, RoadPoint.DEFAULT_LANE_WIDTH * 2.0), 3.0, 0.001,
+			"Doubling the lane width halves the lateral cost")
+
+
 func test_pairing_prefers_facing_over_position():
 	var container = autoqfree(RoadContainer.new())
 	add_child(container)
