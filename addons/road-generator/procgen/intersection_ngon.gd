@@ -21,6 +21,15 @@ const SegGeo := preload("res://addons/road-generator/procgen/segment_geo.gd")
 
 const STOP_ROW_SIZE: float = 2.0  # TODO: make proportional to density
 
+## Meters of lateral error treated as equivalent to one radian of facing
+## misalignment when scoring primary candidates. Lateral offset is weighted more
+## heavily than angle, so a candidate the source aims squarely at is preferred
+## over one that merely faces back from off to the side.
+const _PRIMARY_ANGLE_WEIGHT: float = 6.0
+## Error added to a candidate sitting beside or behind the source, ruling out
+## same-side edges as through partners.
+const _PRIMARY_BEHIND_PENALTY: float = 1.0e6
+
 # ------------------------------------------------------------------------------
 #endregion
 #region Abstract overrides
@@ -199,15 +208,6 @@ func _edge_is_eligible(edges: Array[RoadPoint], index: int, intersection: Node3D
 	return _get_edge_facing(edges[index], intersection) != _IntersectNGonFacing.OTHER
 
 
-## Meters of lateral error treated as equivalent to one radian of facing
-## misalignment when scoring primary candidates. Lateral offset is weighted more
-## heavily than angle, so a candidate the source aims squarely at is preferred
-## over one that merely faces back from off to the side.
-const _PRIMARY_ANGLE_WEIGHT: float = 6.0
-## Error added to a candidate sitting beside or behind the source, ruling out
-## same-side edges as through partners.
-const _PRIMARY_BEHIND_PENALTY: float = 1.0e6
-
 ## Perpendicular distance from `rel` to the ray along `dir`, scaled by lane width
 ## so the lateral-vs-angle balance in pairing holds for roads built at any lane
 ## size: a road with wide lanes spaces its edges proportionally wider, and without
@@ -297,7 +297,19 @@ func _get_or_create_lane(intersection: Node3D, container: RoadContainer, manager
 
 ## Creates or updates a single lane with its tags, curve and draw settings.
 ## Lanes the user has promoted to editable (given an owner) are left untouched.
-func _emit_lane(intersection: Node3D, container: RoadContainer, manager: RoadManager, active_lanes: Array[RoadLane], lane_name: String, prior_tag: String, next_tag: String, entry: Vector3, entry_dir: Vector3, exit_point: Vector3, exit_dir: Vector3, extend_exit: bool = true) -> void:
+func _emit_lane(
+		intersection: Node3D,
+		container: RoadContainer,
+		manager: RoadManager,
+		active_lanes: Array[RoadLane],
+		lane_name: String,
+		prior_tag: String,
+		next_tag: String,
+		entry: Vector3,
+		entry_dir: Vector3,
+		exit_point: Vector3,
+		exit_dir: Vector3,
+		extend_exit: bool = true) -> void:
 	var existing := intersection.get_node_or_null(lane_name)
 	var lane := _get_or_create_lane(intersection, container, manager, lane_name)
 	active_lanes.append(lane)
