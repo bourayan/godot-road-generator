@@ -442,6 +442,8 @@ func _set_draw_lanes_editor(value: bool):
 		if not generate_ai_lanes:
 			seg.clear_lane_segments()
 		seg.update_lane_visibility() # could still have some manually added
+	for inter in get_intersections():
+		inter.update_lane_visibility()
 
 
 func _get_draw_lanes_editor() -> bool:
@@ -452,6 +454,8 @@ func _set_draw_lanes_game(value: bool):
 	_draw_lanes_game = value
 	for seg in get_segments():
 		seg.update_lane_visibility()
+	for inter in get_intersections():
+		inter.update_lane_visibility()
 
 
 func _get_draw_lanes_game() -> bool:
@@ -1171,6 +1175,13 @@ func force_assign_lanes() -> void:
 	# First, get all RoadLanes that are children of detected RoadPoints
 	for _rp in rps:
 		for _rl in _rp.get_children():
+			if not _rl is RoadLane:
+				continue
+			lanes.append(_rl)
+
+	# Then RoadLanes that are children of intersections
+	for _inter in get_intersections():
+		for _rl in _inter.get_children():
 			if not _rl is RoadLane:
 				continue
 			lanes.append(_rl)

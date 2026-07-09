@@ -19,6 +19,17 @@ enum _IntersectNGonFacing {
 
 const SegGeo := preload("res://addons/road-generator/procgen/segment_geo.gd")
 
+const STOP_ROW_SIZE: float = 2.0  # TODO: make proportional to density
+
+## Meters of lateral error treated as equivalent to one radian of facing
+## misalignment when scoring primary candidates. Lateral offset is weighted more
+## heavily than angle, so a candidate the source aims squarely at is preferred
+## over one that merely faces back from off to the side.
+const _PRIMARY_ANGLE_WEIGHT: float = 6.0
+## Error added to a candidate sitting beside or behind the source, ruling out
+## same-side edges as through partners.
+const _PRIMARY_BEHIND_PENALTY: float = 1.0e6
+
 # ------------------------------------------------------------------------------
 #endregion
 #region Abstract overrides
@@ -40,6 +51,77 @@ func generate_mesh(intersection: Node3D, edges: Array[RoadPoint], container: Roa
 func get_min_distance_from_intersection_point(rp: RoadPoint) -> float:
 	# TODO TBD when mesh generation is implemented.
 	return 0.0
+
+
+func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: RoadContainer) -> void:
+	var active_lanes: Array[RoadLane] = []
+	if not container.generate_ai_lanes:
+		_clear_generated_lanes(intersection, active_lanes)
+		return
+
+	var used_names := {}
+	var manager: RoadManager = container.get_manager()
+	var primaries := _compute_edge_primaries(edges, intersection)
+
+	for i in range(edges.size()):
+		var edge: RoadPoint = edges[i]
+		if not is_instance_valid(edge):
+			continue
+		var facing: _IntersectNGonFacing = _get_edge_facing(edge, intersection)
+		if facing == _IntersectNGonFacing.OTHER:
+			continue
+		var entering := _directional_lanes(edge, _entering_dir(facing))
+		if entering.is_empty():
+			continue
+		var entry_dir := _edge_inward_dir(edge, intersection)
+		var primary: int = primaries[i]
+
+		# Through lanes: every entering lane routes straight across to this edge's
+		# primary target. Surplus lanes merge onto its outermost exit lane, built
+		# from the divider outward.
+		if primary >= 0:
+			var exiting := _edge_exit_lanes(edges[primary], intersection)
+			for k in range(entering.size()):
+				var src: Dictionary = entering[k]
+				var entry := _lane_stop_position(edge, intersection, src["index"])
+				var exit_point := intersection.global_transform.origin
+				var exit_dir := entry_dir
+				var next_tag := ""
+				var merged := false
+				if not exiting.is_empty():
+					merged = k >= exiting.size()
+					var target: Dictionary = exiting[mini(k, exiting.size() - 1)]
+					exit_point = _lane_stop_position(target["edge"], intersection, target["index"])
+					exit_dir = -_edge_inward_dir(target["edge"], intersection)
+					next_tag = target["tag"]
+				var lane_name := _tagged_lane_name(used_names, edge.name, src["tag"], "r" if merged else "")
+				_emit_lane(intersection, container, manager, active_lanes, lane_name,
+						src["tag"], next_tag, entry, entry_dir, exit_point, exit_dir,
+						not exiting.is_empty())
+
+		# Turn lanes: the turn-side entering lane reaches each remaining edge.
+		for j in range(edges.size()):
+			if j == i or j == primary or not is_instance_valid(edges[j]):
+				continue
+			var target_edge: RoadPoint = edges[j]
+			var target_facing: _IntersectNGonFacing = _get_edge_facing(target_edge, intersection)
+			if target_facing == _IntersectNGonFacing.OTHER:
+				continue
+			var target_exit := _directional_lanes(target_edge, _exiting_dir(target_facing))
+			if target_exit.is_empty():
+				continue
+			var reference_edge: RoadPoint = edges[primary] if primary >= 0 else null
+			var clockwise := _turn_is_clockwise(edge, target_edge, reference_edge, intersection)
+			var turn_src: Dictionary = entering[entering.size() - 1] if clockwise else entering[0]
+			var turn_dst: Dictionary = target_exit[target_exit.size() - 1] if clockwise else target_exit[0]
+			var turn_entry := _lane_stop_position(edge, intersection, turn_src["index"])
+			var turn_exit := _lane_stop_position(target_edge, intersection, turn_dst["index"])
+			var turn_exit_dir := -_edge_inward_dir(target_edge, intersection)
+			var turn_name := _tagged_lane_name(used_names, edge.name, turn_src["tag"], "a")
+			_emit_lane(intersection, container, manager, active_lanes, turn_name,
+					turn_src["tag"], turn_dst["tag"], turn_entry, entry_dir, turn_exit, turn_exit_dir)
+
+	_clear_generated_lanes(intersection, active_lanes)
 
 
 # ------------------------------------------------------------------------------
@@ -65,6 +147,250 @@ func _get_edge_facing(edge: RoadPoint, intersection: Node3D) -> _IntersectNGonFa
 	return facing
 
 
+## World-space direction along an edge pointing toward the intersection (the
+## travel direction of its entering lanes).
+func _edge_inward_dir(edge: RoadPoint, intersection: Node3D) -> Vector3:
+	var facing: _IntersectNGonFacing = _get_edge_facing(edge, intersection)
+	var parallel_v: Vector3 = edge.global_transform.basis.z.normalized()
+	if facing == _IntersectNGonFacing.ORIGIN:
+		parallel_v = -parallel_v
+	return parallel_v
+
+
+## World-space center of an edge's stop line, where its lanes meet the intersection.
+func _edge_stop_center(edge: RoadPoint, intersection: Node3D) -> Vector3:
+	return edge.global_transform.origin + _edge_inward_dir(edge, intersection) * STOP_ROW_SIZE
+
+
+func _entering_dir(facing: _IntersectNGonFacing) -> int:
+	return RoadPoint.LaneDir.REVERSE if facing == _IntersectNGonFacing.AWAY else RoadPoint.LaneDir.FORWARD
+
+
+func _exiting_dir(facing: _IntersectNGonFacing) -> int:
+	return RoadPoint.LaneDir.FORWARD if facing == _IntersectNGonFacing.AWAY else RoadPoint.LaneDir.REVERSE
+
+
+## Lanes of the given direction on an edge, ordered from the centerline outward,
+## each as a dictionary with its `index` in traffic_dir and its `F#`/`R#` `tag`.
+func _directional_lanes(edge: RoadPoint, dir: int) -> Array:
+	var rev_count := edge.get_rev_lane_count()
+	var result: Array = []
+	for i in range(edge.traffic_dir.size()):
+		if edge.traffic_dir[i] != dir:
+			continue
+		var tag: String
+		if dir == RoadPoint.LaneDir.FORWARD:
+			tag = "F%d" % (i - rev_count)
+		else:
+			tag = "R%d" % (rev_count - 1 - i)
+		result.append({"index": i, "tag": tag})
+	result.sort_custom(func(a, b): return int(a["tag"].substr(1)) < int(b["tag"].substr(1)))
+	return result
+
+
+## Exit lanes available on an edge, tagged with the edge they belong to so a
+## through lane can target them.
+func _edge_exit_lanes(edge: RoadPoint, intersection: Node3D) -> Array:
+	var facing: _IntersectNGonFacing = _get_edge_facing(edge, intersection)
+	if facing == _IntersectNGonFacing.OTHER:
+		return []
+	var lanes := _directional_lanes(edge, _exiting_dir(facing))
+	for lane in lanes:
+		lane["edge"] = edge
+	return lanes
+
+
+## True when the edge at `index` is a valid, intersection-facing edge eligible
+## to take part in lane matching.
+func _edge_is_eligible(edges: Array[RoadPoint], index: int, intersection: Node3D) -> bool:
+	if not is_instance_valid(edges[index]):
+		return false
+	return _get_edge_facing(edges[index], intersection) != _IntersectNGonFacing.OTHER
+
+
+## Perpendicular distance from `rel` to the ray along `dir`, scaled by lane width
+## so the lateral-vs-angle balance in pairing holds for roads built at any lane
+## size: a road with wide lanes spaces its edges proportionally wider, and without
+## this the inflated lateral distances would swamp the width-independent angle.
+func _pairing_lateral_cost(rel: Vector3, dir: Vector3, lane_width: float) -> float:
+	var along := rel.dot(dir)
+	return (rel - dir * along).length() * RoadPoint.DEFAULT_LANE_WIDTH / lane_width
+
+
+## Picks each edge's primary target with a projection loss: cast the edge's
+## travel ray forward through the intersection and score every other edge by how
+## far it sits laterally from that ray (it should lie dead ahead) blended with how
+## head-on the two roads face (their travel directions should oppose). Lowest
+## combined error wins, so both position and facing rotation count. The returned
+## array holds each edge's primary index, or -1 when it has none. Every eligible
+## edge routes its entering lanes through to its primary, reciprocated or not.
+func _compute_edge_primaries(edges: Array[RoadPoint], intersection: Node3D) -> Array[int]:
+	var count := edges.size()
+	var primary: Array[int] = []
+	primary.resize(count)
+	primary.fill(-1)
+	for i in range(count):
+		if not _edge_is_eligible(edges, i, intersection):
+			continue
+		var origin_i := edges[i].global_transform.origin
+		var dir_i := _edge_inward_dir(edges[i], intersection)
+		var best := -1
+		var best_loss := INF
+		for j in range(count):
+			if j == i or not _edge_is_eligible(edges, j, intersection):
+				continue
+			var rel := edges[j].global_transform.origin - origin_i
+			var along := rel.dot(dir_i)
+			var lateral := _pairing_lateral_cost(rel, dir_i, edges[i].lane_width)
+			var dir_j := _edge_inward_dir(edges[j], intersection)
+			var angle := acos(clampf(-dir_i.dot(dir_j), -1.0, 1.0))
+			var loss := lateral + _PRIMARY_ANGLE_WEIGHT * angle
+			if along <= 0.0:
+				loss += _PRIMARY_BEHIND_PENALTY
+			if loss < best_loss:
+				best_loss = loss
+				best = j
+		primary[i] = best
+	return primary
+
+
+## True if the target edge lies clockwise (to the right) of the straight-through
+## direction toward this edge's `reference` (primary) target. Measuring handedness
+## against the primary, rather than the raw inbound facing, ties every left/right
+## flip to the moment the edge's primary pairing changes, so a turn never crosses
+## traffic mid-rotation. Falls back to inbound facing when there is no primary.
+## A right turn sources from the outer entering lane; a left turn from the inner
+## (divider-side) lane.
+func _turn_is_clockwise(edge: RoadPoint, target: RoadPoint, reference: RoadPoint, intersection: Node3D) -> bool:
+	var up: Vector3 = intersection.global_transform.basis.y.normalized()
+	var ahead: Vector3
+	if is_instance_valid(reference):
+		ahead = reference.global_transform.origin - edge.global_transform.origin
+	else:
+		ahead = _edge_inward_dir(edge, intersection)
+	var to_target := target.global_transform.origin - edge.global_transform.origin
+	# Around +Y, a right turn yields a negative signed angle from ahead to target.
+	return ahead.signed_angle_to(to_target, up) < 0.0
+
+
+## Finds an existing generated lane by name or creates one, ensuring group
+## membership and editor metadata.
+func _get_or_create_lane(intersection: Node3D, container: RoadContainer, manager: RoadManager, lane_name: String) -> RoadLane:
+	var existing := intersection.get_node_or_null(lane_name)
+	var lane: RoadLane
+	if existing is RoadLane:
+		lane = existing
+	else:
+		lane = RoadLane.new()
+		intersection.add_child(lane)
+		lane.name = lane_name
+		lane.set_meta("_edit_lock_", true)
+		lane.auto_free_vehicles = container.auto_free_vehicles
+		if container.debug_scene_visible:
+			lane.owner = container.get_owner()
+	if container.ai_lane_group != "":
+		lane.add_to_group(container.ai_lane_group)
+	elif is_instance_valid(manager) and manager.ai_lane_group != "":
+		lane.add_to_group(manager.ai_lane_group)
+	return lane
+
+
+## Creates or updates a single lane with its tags, curve and draw settings.
+## Lanes the user has promoted to editable (given an owner) are left untouched.
+func _emit_lane(
+		intersection: Node3D,
+		container: RoadContainer,
+		manager: RoadManager,
+		active_lanes: Array[RoadLane],
+		lane_name: String,
+		prior_tag: String,
+		next_tag: String,
+		entry: Vector3,
+		entry_dir: Vector3,
+		exit_point: Vector3,
+		exit_dir: Vector3,
+		extend_exit: bool = true) -> void:
+	var existing := intersection.get_node_or_null(lane_name)
+	var lane := _get_or_create_lane(intersection, container, manager, lane_name)
+	active_lanes.append(lane)
+	if existing is RoadLane and is_instance_valid(existing.owner):
+		return
+	lane.lane_prior_tag = prior_tag
+	lane.lane_next_tag = next_tag
+	_assign_through_curve(lane, intersection, entry, exit_point, entry_dir, exit_dir, extend_exit)
+	lane.draw_in_editor = container.draw_lanes_editor
+	lane.draw_in_game = container.draw_lanes_game
+	lane.refresh_geom = true
+	lane.rebuild_geom()
+
+
+## World-space center of a single lane at its edge's stop line. Geometric edges
+## center their lanes; divider-aligned edges keep the direction split at origin.
+func _lane_stop_position(edge: RoadPoint, intersection: Node3D, lane_index: int) -> Vector3:
+	var reference := edge.traffic_dir.size() / 2.0
+	if edge.alignment == RoadPoint.Alignment.DIVIDER:
+		reference = edge.get_rev_lane_count()
+	var offset := (lane_index - reference + 0.5) * edge.lane_width
+	var perpendicular_v: Vector3 = edge.global_transform.basis.x.normalized()
+	return _edge_stop_center(edge, intersection) + perpendicular_v * offset
+
+
+## Curve from an entry RoadPoint to an exit RoadPoint, in the lane's local space.
+## The lane runs straight from each RoadPoint up to its stop line, then arcs
+## across the intersection with bezier handles aligned to the entry and exit
+## travel directions (staying straight when those directions are colinear). With
+## no exit edge to reach, the lane simply ends at the stop line.
+func _assign_through_curve(lane: RoadLane, intersection: Node3D, entry: Vector3, exit_point: Vector3, entry_dir: Vector3, exit_dir: Vector3, extend_exit: bool = true) -> void:
+	var to_local: Transform3D = lane.global_transform.affine_inverse()
+	var dir_in := (to_local.basis * entry_dir).normalized()
+	var dir_out := (to_local.basis * exit_dir).normalized()
+	var entry_stop := to_local * entry
+	var exit_stop := to_local * exit_point
+	var lead := dir_in * (STOP_ROW_SIZE / 3.0)
+	var handle := entry_stop.distance_to(exit_stop) / 3.0
+
+	var curve := Curve3D.new()
+	# Lead in from the entry RoadPoint to its stop line, then arc across.
+	curve.add_point(entry_stop - dir_in * STOP_ROW_SIZE, Vector3.ZERO, lead)
+	curve.add_point(entry_stop, -lead, dir_in * handle)
+	if extend_exit:
+		# Arc to the exit stop line, then lead out to the exit RoadPoint.
+		var out_lead := dir_out * (STOP_ROW_SIZE / 3.0)
+		curve.add_point(exit_stop, -dir_out * handle, out_lead)
+		curve.add_point(exit_stop + dir_out * STOP_ROW_SIZE, -out_lead, Vector3.ZERO)
+	else:
+		curve.add_point(exit_stop, -dir_out * handle, Vector3.ZERO)
+	lane.curve = curve
+
+
+## Builds a lane's tagged name in the segment-lane style, prefixed by the source
+## edge: `edge_pTAG_nTAG` for a straight through lane, with an `a` suffix for a
+## turn or `r` for an outer lane squeezed into a merge. A counter is appended when
+## a name would otherwise repeat (e.g. two turns off the same lane), keeping every
+## lane uniquely and stably named for reuse across rebuilds.
+func _tagged_lane_name(used: Dictionary, edge_name: String, tag: String, suffix: String) -> String:
+	var base := "%s_p%s_n%s%s" % [edge_name, tag, tag, suffix]
+	var lane_name := base
+	var counter := 2
+	while used.has(lane_name):
+		lane_name = "%s%d" % [base, counter]
+		counter += 1
+	used[lane_name] = true
+	return lane_name
+
+
+## Frees previously generated lanes that are no longer active.
+func _clear_generated_lanes(intersection: Node3D, keep: Array[RoadLane]) -> void:
+	for child in intersection.get_children():
+		if not (child is RoadLane):
+			continue
+		if is_instance_valid(child.owner):
+			continue
+		if keep.has(child):
+			continue
+		child.queue_free()
+
+
 ## Generates a triangles from shoulders to intersection point,
 ## and triangles from an edge's shoulders to the intersection point.
 ## The end result is a very low-poly n-gon.[br][br]
@@ -82,8 +408,6 @@ func _generate_debug_mesh(intersection: Node3D, edges: Array[RoadPoint], contain
 	const TOPSIDE_SMOOTHING_GROUP = 1
 	surface_tool.set_smooth_group(TOPSIDE_SMOOTHING_GROUP)
 
-	const STOP_ROW_SIZE: float = 2.0  # TODO: make proportional to density
-	
 	# First, add an additional row of quads to each edge,
 	# to give a UV space for stop marks or other markings.
 	# We also prepare the intersection by storing appropriate
