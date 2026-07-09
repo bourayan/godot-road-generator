@@ -95,6 +95,9 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 					exit_dir = -_edge_inward_dir(target["edge"], intersection)
 					next_tag = target["tag"]
 				var lane_name := _tagged_lane_name(used_names, edge.name, src["tag"], "r" if merged else "")
+				# entry/exit_dir has magnitude to indicate the offset amount
+				entry_dir = entry_dir.normalized() * edge.lane_width / RoadPoint.DEFAULT_LANE_WIDTH
+				exit_dir = exit_dir.normalized() * edge.lane_width / RoadPoint.DEFAULT_LANE_WIDTH
 				_emit_lane(intersection, container, manager, active_lanes, lane_name,
 						src["tag"], next_tag, entry, entry_dir, exit_point, exit_dir,
 						not exiting.is_empty())
@@ -118,6 +121,9 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 			var turn_exit := _lane_stop_position(target_edge, intersection, turn_dst["index"])
 			var turn_exit_dir := -_edge_inward_dir(target_edge, intersection)
 			var turn_name := _tagged_lane_name(used_names, edge.name, turn_src["tag"], "a")
+			# entry/exit_dir has magnitude to indicate the offset amount
+			entry_dir = entry_dir.normalized() * reference_edge.lane_width / RoadPoint.DEFAULT_LANE_WIDTH
+			turn_exit_dir = turn_exit_dir.normalized() * reference_edge.lane_width / RoadPoint.DEFAULT_LANE_WIDTH
 			_emit_lane(intersection, container, manager, active_lanes, turn_name,
 					turn_src["tag"], turn_dst["tag"], turn_entry, entry_dir, turn_exit, turn_exit_dir)
 
@@ -159,7 +165,7 @@ func _edge_inward_dir(edge: RoadPoint, intersection: Node3D) -> Vector3:
 
 ## World-space center of an edge's stop line, where its lanes meet the intersection.
 func _edge_stop_center(edge: RoadPoint, intersection: Node3D) -> Vector3:
-	return edge.global_transform.origin + _edge_inward_dir(edge, intersection) * STOP_ROW_SIZE
+	return edge.global_transform.origin + _edge_inward_dir(edge, intersection) * STOP_ROW_SIZE * edge.lane_width / RoadPoint.DEFAULT_LANE_WIDTH
 
 
 func _entering_dir(facing: _IntersectNGonFacing) -> int:
@@ -340,24 +346,29 @@ func _lane_stop_position(edge: RoadPoint, intersection: Node3D, lane_index: int)
 ## across the intersection with bezier handles aligned to the entry and exit
 ## travel directions (staying straight when those directions are colinear). With
 ## no exit edge to reach, the lane simply ends at the stop line.
+##
+## Note: entry_dir and exit_dir are NOT normalized, so we can pull out .length()
+## which matches the corresponding edge RP lane_width
 func _assign_through_curve(lane: RoadLane, intersection: Node3D, entry: Vector3, exit_point: Vector3, entry_dir: Vector3, exit_dir: Vector3, extend_exit: bool = true) -> void:
 	var to_local: Transform3D = lane.global_transform.affine_inverse()
 	var dir_in := (to_local.basis * entry_dir).normalized()
 	var dir_out := (to_local.basis * exit_dir).normalized()
 	var entry_stop := to_local * entry
 	var exit_stop := to_local * exit_point
-	var lead := dir_in * (STOP_ROW_SIZE / 3.0)
+	var entry_stopsize := STOP_ROW_SIZE * entry_dir.length() # / RoadPoint.DEFAULT_LANE_WIDTH
+	var lead := dir_in * (entry_stopsize / 3.0) # TODO: fix non lane-width aware row size
 	var handle := entry_stop.distance_to(exit_stop) / 3.0
 
 	var curve := Curve3D.new()
 	# Lead in from the entry RoadPoint to its stop line, then arc across.
-	curve.add_point(entry_stop - dir_in * STOP_ROW_SIZE, Vector3.ZERO, lead)
+	curve.add_point(entry_stop - dir_in * entry_stopsize, Vector3.ZERO, lead)
 	curve.add_point(entry_stop, -lead, dir_in * handle)
 	if extend_exit:
 		# Arc to the exit stop line, then lead out to the exit RoadPoint.
-		var out_lead := dir_out * (STOP_ROW_SIZE / 3.0)
+		var exit_stopsize := STOP_ROW_SIZE * exit_dir.length() # / RoadPoint.DEFAULT_LANE_WIDTH
+		var out_lead := dir_out * (exit_stopsize / 3.0) # TODO: fix non lane-width aware row size
 		curve.add_point(exit_stop, -dir_out * handle, out_lead)
-		curve.add_point(exit_stop + dir_out * STOP_ROW_SIZE, -out_lead, Vector3.ZERO)
+		curve.add_point(exit_stop + dir_out * exit_stopsize, -out_lead, Vector3.ZERO) # TODO: fix non lane-width aware row size
 	else:
 		curve.add_point(exit_stop, -dir_out * handle, Vector3.ZERO)
 	lane.curve = curve
@@ -439,7 +450,7 @@ func _generate_debug_mesh(intersection: Node3D, edges: Array[RoadPoint], contain
 		
 		# Aim for real-world texture proportions width:height of 2:1 matching texture,
 		# but then the hight of 1 full UV is half the with across all lanes, so another 2x
-		var uv_height := STOP_ROW_SIZE / lane_width / 8.0 # ratio of 1/4th down vs width of image to be square
+		var uv_height := STOP_ROW_SIZE / lane_width / RoadPoint.DEFAULT_LANE_WIDTH / 2 # ratio of 1/4th down vs width of image to be square
 
 		var perpendicular_v: Vector3 = (edge.transform.basis.x).normalized()
 		var up_vector: Vector3 = (edge.transform.basis.y).normalized()
@@ -461,12 +472,14 @@ func _generate_debug_mesh(intersection: Node3D, edges: Array[RoadPoint], contain
 		if facing == _IntersectNGonFacing.ORIGIN:	
 			parallel_v = -parallel_v
 
-		var shoulder_l_stop: Vector3 = shoulder_l + parallel_v * STOP_ROW_SIZE
-		var shoulder_r_stop: Vector3 = shoulder_r + parallel_v * STOP_ROW_SIZE
-		var gutter_l_stop: Vector3 = gutter_l + parallel_v * STOP_ROW_SIZE
-		var gutter_r_stop: Vector3 = gutter_r + parallel_v * STOP_ROW_SIZE
-		var road_side_l_stop: Vector3 = road_side_l + parallel_v * STOP_ROW_SIZE
-		var road_side_r_stop: Vector3 = road_side_r + parallel_v * STOP_ROW_SIZE
+		var stopsize := STOP_ROW_SIZE * edge.lane_width / RoadPoint.DEFAULT_LANE_WIDTH
+
+		var shoulder_l_stop: Vector3 = shoulder_l + parallel_v * stopsize
+		var shoulder_r_stop: Vector3 = shoulder_r + parallel_v * stopsize
+		var gutter_l_stop: Vector3 = gutter_l + parallel_v * stopsize
+		var gutter_r_stop: Vector3 = gutter_r + parallel_v * stopsize
+		var road_side_l_stop: Vector3 = road_side_l + parallel_v * stopsize
+		var road_side_r_stop: Vector3 = road_side_r + parallel_v * stopsize
 
 		if facing == _IntersectNGonFacing.ORIGIN:	
 			edge_shoulders.append([shoulder_l_stop, shoulder_r_stop])
@@ -535,8 +548,8 @@ func _generate_debug_mesh(intersection: Node3D, edges: Array[RoadPoint], contain
 				current_perpendicular_v = -perpendicular_v
 			var lane_left_side: Vector3 = road_side_l + current_perpendicular_v * (lane_width * i)
 			var lane_right_side: Vector3 = road_side_l + current_perpendicular_v * (lane_width * (i + 1))
-			var lane_left_side_stop: Vector3 = lane_left_side + parallel_v * STOP_ROW_SIZE
-			var lane_right_side_stop: Vector3 = lane_right_side + parallel_v * STOP_ROW_SIZE
+			var lane_left_side_stop: Vector3 = lane_left_side + parallel_v * stopsize
+			var lane_right_side_stop: Vector3 = lane_right_side + parallel_v * stopsize
 
 			# Lane quad
 			var u_near := uv_width*6

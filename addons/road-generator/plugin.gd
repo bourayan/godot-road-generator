@@ -1060,7 +1060,7 @@ func convert_to_intersection_with_new_roadpoint(rp_init: RoadPoint, pos: Vector3
 	undo_redo.add_do_property(rp, "global_transform", new_transform)
 	undo_redo.add_do_method(rp, "look_at", rp_init.global_transform.origin, new_transform.basis.y)
 	undo_redo.add_do_property(rp, "global_transform.basis.y", new_transform.basis.y)
-	
+	rp.copy_settings_from(rp_init)
 	undo_redo.add_do_reference(rp)
 	
 	var inter = subaction_create_intersection(rp_init, rp, undo_redo)
