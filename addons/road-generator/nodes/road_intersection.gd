@@ -226,6 +226,24 @@ func sort_branches() -> void:
 		_sort_edges_clockwise()
 
 
+## Generate this intersection's exterior edge curves, respecting the container's
+## create_edge_curves toggle. Mirrors [method RoadSegment.generate_edge_curves].
+func generate_edge_curves() -> void:
+	if not is_instance_valid(settings) or not is_instance_valid(container):
+		return
+	if not container.create_edge_curves:
+		clear_edge_curves()
+		return
+	settings.generate_edge_curves(self, edge_points, container)
+
+
+## Remove this intersection's generated edge curves.
+func clear_edge_curves() -> void:
+	if not is_instance_valid(settings) or not is_instance_valid(container):
+		return
+	settings.clear_edge_curves(self, edge_points, container)
+
+
 ## Match the draw settings of generated lanes to the container's settings.
 func update_lane_visibility() -> void:
 	for child in get_children():
@@ -278,6 +296,7 @@ func _rebuild() -> void:
 	container._create_collisions(_mesh)
 
 	settings.generate_lanes(self, edge_points, container)
+	generate_edge_curves()
 
 
 func _do_roadmesh_creation():
