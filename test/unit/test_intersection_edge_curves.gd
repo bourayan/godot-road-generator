@@ -224,3 +224,19 @@ func test_adding_a_branch_creates_an_edge():
 
 	assert_eq(_edge_curves(inter).size(), 3, "New branch adds an edge curve")
 	assert_not_null(inter.get_node_or_null("edge_p3"), "The new branch's edge curve exists")
+
+
+func test_container_toggle_generates_and_clears_edges():
+	var container = autoqfree(RoadContainer.new())
+	add_child(container)
+	var inter := _make_intersection(container)
+	container.rebuild_segments(true)
+	assert_eq(_edge_curves(inter).size(), 0, "No edge curves while the toggle is off")
+
+	# Flipping the container toggle drives the intersection edges directly, without
+	# waiting for a rebuild, in parallel with how it drives segment edge curves.
+	container.create_edge_curves = true
+	assert_eq(_edge_curves(inter).size(), 2, "Enabling the toggle generates intersection edges")
+
+	container.create_edge_curves = false
+	assert_eq(_edge_curves(inter).size(), 0, "Disabling the toggle clears intersection edges")

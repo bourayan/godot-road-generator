@@ -485,9 +485,13 @@ func _set_create_edge_curves(value: bool) -> void:
 	if create_edge_curves:
 		for seg in get_segments():
 			seg.generate_edge_curves()
+		for inter in get_intersections():
+			inter.generate_edge_curves()
 	else:
 		for seg in get_segments():
 			seg.clear_edge_curves()
+		for inter in get_intersections():
+			inter.clear_edge_curves()
 
 
 # ------------------------------------------------------------------------------
