@@ -442,7 +442,7 @@ func _generate_debug_mesh(intersection: Node3D, edges: Array[RoadPoint], contain
 			return Mesh.new() # Empty mesh.
 		
 		var lane_width: float = edge.lane_width
-		var lanes_count = edge.lanes.size()
+		var lanes_count = edge.traffic_dir.size() # use traffic_dir over lanes for consistency with segment generation
 		var lanes_tot_width: float = lane_width * lanes_count
 		var shoulder_offset_l: float = edge.shoulder_width_l
 		var shoulder_offset_r: float = edge.shoulder_width_r
