@@ -121,18 +121,6 @@ func test_edge_curves_independent_of_ai_lanes():
 		assert_eq(edge.curve.point_count, 4, "Edge curve is fully built without AI lanes")
 
 
-func test_rebuild_does_not_duplicate_edge_curves():
-	var container = autoqfree(RoadContainer.new())
-	add_child(container)
-	container.create_edge_curves = true
-	var inter := _make_intersection(container)
-
-	container.rebuild_segments(true)
-	container.rebuild_segments(true)
-
-	assert_eq(_edge_curves(inter).size(), 2, "Edge curves reused, not duplicated, on rebuild")
-
-
 func test_edge_curve_node_reused_on_rebuild():
 	var container = autoqfree(RoadContainer.new())
 	add_child(container)
@@ -145,6 +133,7 @@ func test_edge_curve_node_reused_on_rebuild():
 	var after: Path3D = inter.get_node("edge_p1")
 
 	assert_eq(before, after, "The Path3D node itself is reused, only its curve rewritten")
+	assert_eq(_edge_curves(inter).size(), 2, "Edge curves reused, not duplicated, on rebuild")
 
 
 func test_edge_curve_children_survive_rebuild():
@@ -201,7 +190,7 @@ func test_removing_a_branch_deletes_its_edge_and_regenerates():
 	container.rebuild_segments(true)
 
 	# The orphaned edge is swept away and the survivors regenerate to their new
-	# clockwise neighbours, leaving one curve per remaining branch.
+	# neighbours, leaving one curve per remaining branch.
 	assert_eq(_edge_curves(inter).size(), 3, "Removed branch drops one edge curve")
 	assert_null(inter.get_node_or_null("edge_pw"), "The removed branch's edge curve is gone")
 
