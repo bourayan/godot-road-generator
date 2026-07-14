@@ -128,9 +128,11 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 
 
 ## Builds one exterior edge curve per branch, spanning from each edge to its
-## clockwise neighbour, and sweeps away curves whose branch is gone. Edges MUST
-## have been sorted beforehand; the neighbour is simply the next sorted edge, so a
-## removed branch's curve is dropped and its neighbour regenerated automatically.
+## counter-clockwise neighbour so the curve named after an edge hugs that edge's
+## right-hand side (drive-on-right), the intuitive parent for right-side decoration
+## like sidewalks. Sweeps away curves whose branch is gone. Edges MUST have been
+## sorted beforehand; the neighbour is simply the previous sorted edge, so a removed
+## branch's curve is dropped and its neighbour regenerated automatically.
 func generate_edge_curves(intersection: Node3D, edges: Array[RoadPoint], container: RoadContainer) -> void:
 	# A lone branch has no exterior span to bound.
 	if edges.size() < 2:
@@ -141,7 +143,7 @@ func generate_edge_curves(intersection: Node3D, edges: Array[RoadPoint], contain
 	var count := edges.size()
 	for i in range(count):
 		var edge: RoadPoint = edges[i]
-		var neighbor: RoadPoint = edges[(i + 1) % count]
+		var neighbor: RoadPoint = edges[(i - 1 + count) % count]
 		if not is_instance_valid(edge) or not is_instance_valid(neighbor):
 			continue
 		if _get_edge_facing(edge, intersection) == _IntersectNGonFacing.OTHER:
@@ -152,9 +154,11 @@ func generate_edge_curves(intersection: Node3D, edges: Array[RoadPoint], contain
 		var path := _get_or_create_edge_curve(intersection, EDGE_PREFIX + edge.name)
 		active.append(path)
 
+		# Anchor at this edge's s1 (right-hand) corner and run to the neighbour's s0,
+		# putting the named curve on the edge's right rather than its left.
 		var here := _edge_exterior_corners(edge, intersection)
 		var there := _edge_exterior_corners(neighbor, intersection)
-		_assign_edge_curve(path, here["s0"], here["s0_stop"], there["s1_stop"], there["s1"])
+		_assign_edge_curve(path, here["s1"], here["s1_stop"], there["s0_stop"], there["s0"])
 
 	_clear_generated_edge_curves(intersection, active)
 
