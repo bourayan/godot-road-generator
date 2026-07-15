@@ -21,6 +21,9 @@ const SegGeo := preload("res://addons/road-generator/procgen/segment_geo.gd")
 
 const STOP_ROW_SIZE: float = 2.0  # TODO: make proportional to density
 
+## Prefix for generated edge-curve nodes, named `edge_{starting RoadPoint name}`.
+const EDGE_PREFIX := "edge_"
+
 ## Meters of lateral error treated as equivalent to one radian of facing
 ## misalignment when scoring primary candidates. Lateral offset is weighted more
 ## heavily than angle, so a candidate the source aims squarely at is preferred
@@ -128,6 +131,46 @@ func generate_lanes(intersection: Node3D, edges: Array[RoadPoint], container: Ro
 					turn_src["tag"], turn_dst["tag"], turn_entry, entry_dir, turn_exit, turn_exit_dir)
 
 	_clear_generated_lanes(intersection, active_lanes)
+
+
+## Builds one exterior edge curve per branch, spanning from each edge to its
+## counter-clockwise neighbour so the curve named after an edge hugs that edge's
+## right-hand side (drive-on-right), the intuitive parent for right-side decoration
+## like sidewalks. Sweeps away curves whose branch is gone. Edges MUST have been
+## sorted beforehand; the neighbour is simply the previous sorted edge, so a removed
+## branch's curve is dropped and its neighbour regenerated automatically.
+func generate_edge_curves(intersection: Node3D, edges: Array[RoadPoint], container: RoadContainer) -> void:
+	# A lone branch has no exterior span to bound.
+	if edges.size() < 2:
+		_clear_generated_edge_curves(intersection, [])
+		return
+
+	var active: Array[Path3D] = []
+	var count := edges.size()
+	for i in range(count):
+		var edge: RoadPoint = edges[i]
+		var neighbor: RoadPoint = edges[(i - 1 + count) % count]
+		if not is_instance_valid(edge) or not is_instance_valid(neighbor):
+			continue
+		if _get_edge_facing(edge, intersection) == _IntersectNGonFacing.OTHER:
+			continue
+		if _get_edge_facing(neighbor, intersection) == _IntersectNGonFacing.OTHER:
+			continue
+
+		var path := _get_or_create_edge_curve(intersection, EDGE_PREFIX + edge.name)
+		active.append(path)
+
+		# Anchor at this edge's s1 (right-hand) corner and run to the neighbour's s0,
+		# putting the named curve on the edge's right rather than its left.
+		var here := _edge_exterior_corners(edge, intersection)
+		var there := _edge_exterior_corners(neighbor, intersection)
+		_assign_edge_curve(path, here["s1"], here["s1_stop"], there["s0_stop"], there["s0"])
+
+	_clear_generated_edge_curves(intersection, active)
+
+
+func clear_edge_curves(intersection: Node3D, edges: Array[RoadPoint], container: RoadContainer) -> void:
+	_clear_generated_edge_curves(intersection, [])
 
 
 # ------------------------------------------------------------------------------
@@ -388,6 +431,103 @@ func _tagged_lane_name(used: Dictionary, edge_name: String, tag: String, suffix:
 		counter += 1
 	used[lane_name] = true
 	return lane_name
+
+
+## World-space outer gutter corners of an edge, matching the intersection mesh's
+## exterior border. Returns the two facing-normalised sides (`s0`/`s1`, ordered as
+## the mesh stores them in edge_gutters) each at the RoadPoint (`s0`/`s1`) and at
+## the stop line (`s0_stop`/`s1_stop`). Held in the road plane (no vertical gutter
+## drop) and offset like the [RoadSegment] edge curves so the two line up across
+## the RoadPoint. Divider-aligned edges split their offset by direction to match
+## the segment edge curves rather than the mesh's geometric centreline.
+func _edge_exterior_corners(edge: RoadPoint, intersection: Node3D) -> Dictionary:
+	var facing: _IntersectNGonFacing = _get_edge_facing(edge, intersection)
+	var perpendicular_v: Vector3 = edge.global_transform.basis.x.normalized()
+	var parallel_v: Vector3 = edge.global_transform.basis.z.normalized()
+	if facing == _IntersectNGonFacing.ORIGIN:
+		parallel_v = -parallel_v
+	var origin: Vector3 = edge.global_transform.origin
+
+	var offset_l: float
+	var offset_r: float
+	if edge.alignment == RoadPoint.Alignment.GEOMETRIC:
+		var half_width: float = edge.lanes.size() * edge.lane_width * 0.5
+		offset_l = half_width
+		offset_r = half_width
+	else:
+		offset_l = edge.get_rev_lane_count() * edge.lane_width
+		offset_r = edge.get_fwd_lane_count() * edge.lane_width
+	offset_l += edge.shoulder_width_l + edge.gutter_profile[0]
+	offset_r += edge.shoulder_width_r + edge.gutter_profile[0]
+
+	var gutter_l: Vector3 = origin - perpendicular_v * offset_l
+	var gutter_r: Vector3 = origin + perpendicular_v * offset_r
+	var stop: Vector3 = parallel_v * STOP_ROW_SIZE
+
+	if facing == _IntersectNGonFacing.ORIGIN:
+		return {
+			"s0": gutter_l, "s0_stop": gutter_l + stop,
+			"s1": gutter_r, "s1_stop": gutter_r + stop,
+		}
+	return {
+		"s0": gutter_r, "s0_stop": gutter_r + stop,
+		"s1": gutter_l, "s1_stop": gutter_l + stop,
+	}
+
+
+## Finds an existing edge curve by name or creates one, mirroring the editor
+## metadata of [RoadSegment] edge curves. The existing node is always reused so
+## any children the user has parented to it survive regeneration.
+func _get_or_create_edge_curve(intersection: Node3D, edge_name: String) -> Path3D:
+	var existing := intersection.get_node_or_null(edge_name)
+	if existing is Path3D:
+		return existing
+	var path := Path3D.new()
+	intersection.add_child(path)
+	path.name = edge_name
+	path.owner = intersection.owner
+	path.set_meta("_edit_lock_", true)
+	return path
+
+
+## Writes the four-point exterior boundary curve for one edge into `path`, in its
+## local space: from the edge's outer RoadPoint corner along its gutter to the
+## stop line, across to the neighbour's stop line, then out to the neighbour's
+## RoadPoint corner. Handles are sharp (non-aligned) at the two bends, pointing
+## straight at the source corner and the opposite corner, matching the low-poly
+## [RoadSegment] edge-curve profile. A fresh [Curve3D] is assigned rather than the
+## node replaced, so the path node and its children persist.
+func _assign_edge_curve(path: Path3D, p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3) -> void:
+	var to_local: Transform3D = path.global_transform.affine_inverse()
+	var l0: Vector3 = to_local * p0
+	var l1: Vector3 = to_local * p1
+	var l2: Vector3 = to_local * p2
+	var l3: Vector3 = to_local * p3
+
+	var curve := Curve3D.new()
+	curve.add_point(l0, Vector3.ZERO, (l1 - l0) / 3.0)
+	curve.add_point(l1, (l0 - l1) / 3.0, (l2 - l1) / 3.0)
+	curve.add_point(l2, (l1 - l2) / 3.0, (l3 - l2) / 3.0)
+	curve.add_point(l3, (l2 - l3) / 3.0, Vector3.ZERO)
+	path.curve = curve
+
+
+## Frees previously generated edge curves that are no longer active, identified by
+## the `edge_` prefix. RoadLanes (also Path3D children) are left untouched. Nodes
+## are detached before being freed, mirroring [method RoadSegment.clear_edge_curves],
+## so their names are released immediately rather than on the deferred free.
+func _clear_generated_edge_curves(intersection: Node3D, keep: Array) -> void:
+	for child in intersection.get_children():
+		if child is RoadLane:
+			continue
+		if not (child is Path3D):
+			continue
+		if not str(child.name).begins_with(EDGE_PREFIX):
+			continue
+		if keep.has(child):
+			continue
+		intersection.remove_child(child)
+		child.queue_free()
 
 
 ## Frees previously generated lanes that are no longer active.
