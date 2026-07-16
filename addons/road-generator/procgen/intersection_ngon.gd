@@ -587,6 +587,9 @@ func _generate_debug_mesh(intersection: Node3D, edges: Array[RoadPoint], contain
 		var shoulder_offset_l: float = edge.shoulder_width_l
 		var shoulder_offset_r: float = edge.shoulder_width_r
 		var gutter: Vector2 = edge.gutter_profile
+		var alignment_offset: float = 0.0
+		if edge.alignment == RoadPoint.Alignment.DIVIDER:
+			alignment_offset = (edge.get_rev_lane_count() - edge.traffic_dir.size() / 2.0) * edge.lane_width
 		
 		# Aim for real-world texture proportions width:height of 2:1 matching texture,
 		# but then the hight of 1 full UV is half the with across all lanes, so another 2x
@@ -600,6 +603,8 @@ func _generate_debug_mesh(intersection: Node3D, edges: Array[RoadPoint], contain
 		var road_side_r: Vector3 = edge.position
 		road_side_l -= perpendicular_v * (lanes_tot_width / 2.0)
 		road_side_r += perpendicular_v * (lanes_tot_width / 2.0)
+		road_side_l -= perpendicular_v * alignment_offset
+		road_side_r -= perpendicular_v * alignment_offset
 
 		var shoulder_l: Vector3 = road_side_l
 		var shoulder_r: Vector3 = road_side_r
@@ -609,7 +614,7 @@ func _generate_debug_mesh(intersection: Node3D, edges: Array[RoadPoint], contain
 		var gutter_l: Vector3 = shoulder_l + (gutter[0] * -perpendicular_v + gutter[1] * up_vector)
 		var gutter_r: Vector3 = shoulder_r + (gutter[0] * perpendicular_v + gutter[1] * up_vector)
 
-		if facing == _IntersectNGonFacing.ORIGIN:	
+		if facing == _IntersectNGonFacing.ORIGIN:
 			parallel_v = -parallel_v
 
 		var stopsize := STOP_ROW_SIZE * edge.lane_width / RoadPoint.DEFAULT_LANE_WIDTH
